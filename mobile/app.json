@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Traveloop",
+    "slug": "traveloop",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "traveloop",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.traveloop.app"
+    },
+    "android": {
+      "package": "com.traveloop.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#1B7FF0"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "extra": {
+      "publicApiUrl": "${EXPO_PUBLIC_API_URL}"
+    }
+  }
+}

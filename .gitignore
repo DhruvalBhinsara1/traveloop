@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+mobile/node_modules/
+server/node_modules/
+
+# Expo / React Native
+mobile/.expo/
+mobile/.expo-shared/
+mobile/dist/
+mobile/web-build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+mobile/.env
+mobile/.env.*
+!mobile/.env.example
+server/.env
+server/.env.*
+!server/.env.example
+
+# Build output
+dist/
+build/
+coverage/
+
+# Prisma / local data
+server/prisma/dev.db
+server/prisma/dev.db-journal
+*.sqlite
+*.sqlite3
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

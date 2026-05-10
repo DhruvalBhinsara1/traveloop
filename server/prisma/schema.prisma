@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  password  String
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  trips     Trip[]
+}
+
+model Trip {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String?
+  coverImage  String?
+  budget      Float?
+  startDate   DateTime
+  endDate     DateTime
+  isPublic    Boolean   @default(false)
+  shareToken  String?   @unique
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id])
+  stops       Stop[]
+  checklist   ChecklistItem[]
+  notes       Note[]
+
+  @@index([userId])
+}
+
+model Stop {
+  id          Int        @id @default(autoincrement())
+  cityName    String
+  country     String
+  arrivalDate DateTime
+  departDate  DateTime
+  order       Int
+  tripId      Int
+  trip        Trip       @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  activities  Activity[]
+
+  @@index([tripId])
+}
+
+model Activity {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  category    String
+  cost        Float     @default(0)
+  duration    Int?
+  date        DateTime?
+  stopId      Int
+  stop        Stop      @relation(fields: [stopId], references: [id], onDelete: Cascade)
+
+  @@index([stopId])
+}
+
+model ChecklistItem {
+  id       Int     @id @default(autoincrement())
+  label    String
+  isPacked Boolean @default(false)
+  category String
+  tripId   Int
+  trip     Trip    @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+}
+
+model Note {
+  id        Int      @id @default(autoincrement())
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tripId    Int
+  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+}
