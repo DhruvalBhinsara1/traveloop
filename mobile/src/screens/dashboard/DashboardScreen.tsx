@@ -18,7 +18,7 @@ import { Screen } from '../../components/Screen';
 import { colors, fontFamily, radius, shadows, typography } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTrips } from '../../hooks/useTrips';
-import { calcStopSubtotal, calcTotal, formatMoney } from '../../utils/budgetCalc';
+import { calcStopSubtotal, calcTripTotal, formatMoney } from '../../utils/budgetCalc';
 import { categoryIcon, getDestinationImage } from '../../utils/photos';
 import { formatDateRange, getTripDays, isUpcoming } from '../../utils/dateHelpers';
 import { CreateTripSheet } from '../trips/CreateTripSheet';
@@ -167,7 +167,7 @@ function NextTripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
   const stops = [...(trip.stops ?? [])].sort((a, b) => a.order - b.order);
   const activityCount = stops.reduce((count, stop) => count + (stop.activities?.length ?? 0), 0);
   const cityCount = stops.length;
-  const total = calcTotal(stops);
+  const total = calcTripTotal(trip);
   const budget = Number(trip.budget ?? 0);
   const budgetPercent = budget ? Math.min(100, Math.round((total / budget) * 100)) : 0;
   const coverImage = trip.coverImage ?? getDestinationImage(stops[0]?.cityName ?? trip.title);

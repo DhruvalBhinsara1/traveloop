@@ -25,7 +25,8 @@ const coverUpload = multer({
 const nestedTripInclude = {
   stops: { orderBy: { order: 'asc' }, include: { activities: true } },
   checklist: true,
-  notes: { orderBy: { updatedAt: 'desc' } }
+  notes: { orderBy: { updatedAt: 'desc' } },
+  billExpenses: { orderBy: { createdAt: 'desc' }, include: { paidBy: true } }
 };
 
 export const getOwnedTrip = async (tripId, userId) => {
@@ -48,7 +49,8 @@ tripsRouter.get('/', asyncHandler(async (req, res) => {
     include: {
       stops: { orderBy: { order: 'asc' }, include: { activities: true } },
       checklist: true,
-      notes: true
+      notes: true,
+      billExpenses: { orderBy: { createdAt: 'desc' }, include: { paidBy: true } }
     }
   });
 

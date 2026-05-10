@@ -24,8 +24,10 @@ import {
   CATEGORY_ICONS,
   CATEGORY_LABELS,
   calcByCategory,
+  calcSharedExpenseTotal,
   calcStopSubtotal,
   calcTotal,
+  calcTripTotal,
   formatMoney,
   sortActivitiesByDate
 } from '../../utils/budgetCalc';
@@ -208,6 +210,10 @@ export function TripDetailScreen({ route, navigation }: Props) {
     }
   };
 
+  const syncBillExpenses = useCallback((expenses: BillExpense[]) => {
+    setTrip((current) => (current ? { ...current, billExpenses: expenses } : current));
+  }, []);
+
   const changeCover = async () => {
     if (!trip || coverUploading) return;
 
@@ -353,7 +359,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
           )}
         </Tab.Screen>
         <Tab.Screen name="Budget">{() => <BudgetTab trip={trip} />}</Tab.Screen>
-        <Tab.Screen name="Split">{() => <SplitTab tripId={trip.id} />}</Tab.Screen>
+        <Tab.Screen name="Split">{() => <SplitTab tripId={trip.id} onExpensesChange={syncBillExpenses} />}</Tab.Screen>
         <Tab.Screen name="Checklist">
           {() => (
             <ChecklistTab
@@ -634,32 +640,54 @@ function ManageAction({
 }
 
 function BudgetTab({ trip }: { trip: Trip }) {
-  const total = calcTotal(trip.stops);
+  const itineraryTotal = calcTotal(trip.stops);
+  const sharedTotal = calcSharedExpenseTotal(trip.billExpenses ?? []);
+  const total = calcTripTotal(trip);
   const budget = Number(trip.budget ?? 0);
   const percent = budget ? Math.min(100, Math.round((total / budget) * 100)) : 0;
+  const budgetDelta = budget - total;
+  const budgetLine = budget
+    ? budgetDelta >= 0
+      ? `${formatMoney(budgetDelta)} remaining - ${percent}% used`
+      : `${formatMoney(Math.abs(budgetDelta))} over budget`
+    : 'No trip budget set';
   const byCategory = calcByCategory(trip.stops);
   const chartData = Object.entries(byCategory)
     .filter(([, value]) => value > 0)
     .map(([label, value], index) => ({ text: label, value, color: chartColors[index % chartColors.length] }));
+  const fullChartData = sharedTotal > 0
+    ? [...chartData, { text: 'Shared expenses', value: sharedTotal, color: colors.primaryDark }]
+    : chartData;
 
   return (
     <ScrollView contentContainerStyle={styles.tabContent}>
       <View style={styles.budgetCard}>
-        <Text style={styles.meta}>Estimated</Text>
+        <Text style={styles.meta}>Estimated spend</Text>
         <Text style={[styles.budgetTotal, budget > 0 && total > budget && styles.dangerText]}>{formatMoney(total)}</Text>
-        <Text style={styles.body}>{budget ? `${formatMoney(budget)} budget - ${percent}% used` : 'No trip budget set'}</Text>
+        <Text style={styles.body}>{budgetLine}</Text>
         <ProgressBar value={budget ? total : 0} max={budget || 1} danger={budget > 0 && total > budget} />
       </View>
 
+      <View style={styles.budgetSplitRow}>
+        <View style={styles.budgetMiniCard}>
+          <Text style={styles.meta}>Itinerary</Text>
+          <Text style={styles.budgetMiniValue}>{formatMoney(itineraryTotal)}</Text>
+        </View>
+        <View style={styles.budgetMiniCard}>
+          <Text style={styles.meta}>Shared bills</Text>
+          <Text style={styles.budgetMiniValue}>{formatMoney(sharedTotal)}</Text>
+        </View>
+      </View>
+
       <View style={styles.chartCard}>
-        {chartData.length ? (
-          <PieChart data={chartData} donut radius={88} innerRadius={55} />
+        {fullChartData.length ? (
+          <PieChart data={fullChartData} donut radius={88} innerRadius={55} />
         ) : (
-          <EmptyPanel title="No costs yet" body="Add activities with cost estimates to see the chart." compact />
+          <EmptyPanel title="No costs yet" body="Add itinerary costs or shared expenses to see the chart." compact />
         )}
       </View>
 
-      {chartData.map((item) => (
+      {fullChartData.map((item) => (
         <View key={item.text} style={styles.breakdownRow}>
           <View style={[styles.legendDot, { backgroundColor: item.color }]} />
           <Text style={styles.itemTitle}>{item.text}</Text>
@@ -670,7 +698,7 @@ function BudgetTab({ trip }: { trip: Trip }) {
   );
 }
 
-function SplitTab({ tripId }: { tripId: number }) {
+function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChange: (expenses: BillExpense[]) => void }) {
   const [split, setSplit] = useState<BillSplit | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -683,13 +711,14 @@ function SplitTab({ tripId }: { tripId: number }) {
     try {
       const data = await billsApi.get(tripId);
       setSplit(data);
+      onExpensesChange(data.expenses);
       setSelectedPayerId((current) => current ?? data.participants[0]?.id ?? null);
     } catch (error) {
       Toast.show({ type: 'error', text1: 'Could not load split', text2: getErrorMessage(error) });
     } finally {
       setLoading(false);
     }
-  }, [tripId]);
+  }, [onExpensesChange, tripId]);
 
   useEffect(() => {
     loadSplit();
@@ -714,6 +743,7 @@ function SplitTab({ tripId }: { tripId: number }) {
     try {
       const data = await billsApi.addParticipant(tripId, { name });
       setSplit(data);
+      onExpensesChange(data.expenses);
       setParticipantName('');
       setSelectedPayerId((current) => current ?? data.participants[0]?.id ?? null);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -734,6 +764,7 @@ function SplitTab({ tripId }: { tripId: number }) {
           try {
             const data = await billsApi.removeParticipant(participant.id);
             setSplit(data);
+            onExpensesChange(data.expenses);
           } catch (error) {
             Toast.show({ type: 'error', text1: 'Could not remove traveler', text2: getErrorMessage(error) });
           }
@@ -752,6 +783,7 @@ function SplitTab({ tripId }: { tripId: number }) {
     try {
       const data = await billsApi.addExpense(tripId, { title, amount, paidById: selectedPayerId });
       setSplit(data);
+      onExpensesChange(data.expenses);
       setExpenseTitle('');
       setExpenseAmount('');
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -766,6 +798,7 @@ function SplitTab({ tripId }: { tripId: number }) {
     try {
       const data = await billsApi.removeExpense(expense.id);
       setSplit(data);
+      onExpensesChange(data.expenses);
     } catch (error) {
       Toast.show({ type: 'error', text1: 'Could not remove expense', text2: getErrorMessage(error) });
     }
@@ -1654,6 +1687,27 @@ const styles = StyleSheet.create({
     fontFamily: 'Nunito_800ExtraBold',
     fontSize: 34,
     color: colors.white
+  },
+  budgetSplitRow: {
+    flexDirection: 'row',
+    gap: 12
+  },
+  budgetMiniCard: {
+    flex: 1,
+    minHeight: 72,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: 12,
+    justifyContent: 'center',
+    gap: 3
+  },
+  budgetMiniValue: {
+    color: colors.charcoal,
+    fontFamily: fontFamily.headingBold,
+    fontSize: 18,
+    lineHeight: 23
   },
   dangerText: {
     color: '#FCA5A5'

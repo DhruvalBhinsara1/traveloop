@@ -106,6 +106,7 @@ export type Trip = {
   stops: Stop[];
   checklist: ChecklistItem[];
   notes: Note[];
+  billExpenses?: BillExpense[];
   createdAt?: string;
   updatedAt?: string;
 };

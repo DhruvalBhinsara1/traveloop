@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 
-import { Activity, ActivityCategory, Stop, Trip } from '../api/types';
+import { Activity, ActivityCategory, BillExpense, Stop, Trip } from '../api/types';
 
 export const CATEGORY_LABELS: Record<ActivityCategory, string> = {
   sightseeing: 'Sightseeing',
@@ -34,6 +34,12 @@ export const ACTIVITY_CATEGORIES = Object.keys(CATEGORY_LABELS) as ActivityCateg
 export const calcTotal = (stops: Stop[] = []) =>
   stops.flatMap((stop) => stop.activities ?? []).reduce((sum, activity) => sum + Number(activity.cost || 0), 0);
 
+export const calcSharedExpenseTotal = (expenses: BillExpense[] = []) =>
+  expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+
+export const calcTripTotal = (trip?: Trip | null) =>
+  calcTotal(trip?.stops ?? []) + calcSharedExpenseTotal(trip?.billExpenses ?? []);
+
 export const calcByCategory = (stops: Stop[] = []) =>
   stops.flatMap((stop) => stop.activities ?? []).reduce<Record<ActivityCategory, number>>((acc, activity) => {
     acc[activity.category] = (acc[activity.category] || 0) + Number(activity.cost || 0);
@@ -44,7 +50,7 @@ export const calcStopSubtotal = (stop: Stop) =>
   (stop.activities ?? []).reduce((sum, activity) => sum + Number(activity.cost || 0), 0);
 
 export const calcBudgetStats = (trip?: Trip | null) => {
-  const total = calcTotal(trip?.stops ?? []);
+  const total = calcTripTotal(trip);
   const budget = Number(trip?.budget ?? 0);
   const percentage = budget > 0 ? Math.min(100, Math.round((total / budget) * 100)) : 0;
 

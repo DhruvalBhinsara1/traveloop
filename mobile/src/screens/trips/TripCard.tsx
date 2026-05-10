@@ -3,7 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ImageBackground, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { Trip } from '../../api/types';
-import { calcTotal, formatMoney } from '../../utils/budgetCalc';
+import { calcTripTotal, formatMoney } from '../../utils/budgetCalc';
 import { formatDateRange, getTripDays } from '../../utils/dateHelpers';
 import { colors, fonts, radii, spacing } from '../../utils/theme';
 
@@ -28,7 +28,7 @@ export const getTripImage = (trip: Trip) => {
 
 export function TripCard({ trip, onPress, compact = false }: TripCardProps) {
   const cityCount = trip.stops?.length ?? 0;
-  const total = calcTotal(trip.stops ?? []);
+  const total = calcTripTotal(trip);
 
   return (
     <Pressable onPress={onPress} style={[styles.card, compact && styles.compactCard]}>
