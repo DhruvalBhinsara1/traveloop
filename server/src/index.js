@@ -25,6 +25,14 @@ app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
+app.get('/', (_req, res) => {
+  res.json({
+    ok: true,
+    service: 'traveloop-api',
+    health: '/health',
+  });
+});
+
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'traveloop-api' });
 });
