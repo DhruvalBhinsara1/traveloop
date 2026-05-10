@@ -22,12 +22,9 @@ const configureCloudinary = () => {
   }
 };
 
-export const uploadTripCover = ({ buffer, mimetype, tripId, userId }) =>
+const uploadImage = ({ buffer, mimetype, folder, publicId, transformation }) =>
   new Promise((resolve, reject) => {
     configureCloudinary();
-
-    const folder = process.env.CLOUDINARY_FOLDER || 'traveloop/trip-covers';
-    const publicId = `user-${userId}-trip-${tripId}-${Date.now()}`;
 
     const stream = cloudinary.uploader.upload_stream(
       {
@@ -35,10 +32,7 @@ export const uploadTripCover = ({ buffer, mimetype, tripId, userId }) =>
         public_id: publicId,
         resource_type: 'image',
         overwrite: true,
-        transformation: [
-          { width: 1400, height: 900, crop: 'fill', gravity: 'auto' },
-          { quality: 'auto', fetch_format: 'auto' }
-        ]
+        transformation
       },
       (error, result) => {
         if (error) {
@@ -60,4 +54,28 @@ export const uploadTripCover = ({ buffer, mimetype, tripId, userId }) =>
     );
 
     stream.end(buffer);
+  });
+
+export const uploadTripCover = ({ buffer, mimetype, tripId, userId }) =>
+  uploadImage({
+    buffer,
+    mimetype,
+    folder: process.env.CLOUDINARY_FOLDER || 'traveloop/trip-covers',
+    publicId: `user-${userId}-trip-${tripId}-${Date.now()}`,
+    transformation: [
+      { width: 1400, height: 900, crop: 'fill', gravity: 'auto' },
+      { quality: 'auto', fetch_format: 'auto' }
+    ]
+  });
+
+export const uploadAvatar = ({ buffer, mimetype, userId }) =>
+  uploadImage({
+    buffer,
+    mimetype,
+    folder: process.env.CLOUDINARY_AVATAR_FOLDER || 'traveloop/avatars',
+    publicId: `user-${userId}-avatar-${Date.now()}`,
+    transformation: [
+      { width: 500, height: 500, crop: 'fill', gravity: 'auto' },
+      { quality: 'auto', fetch_format: 'auto' }
+    ]
   });

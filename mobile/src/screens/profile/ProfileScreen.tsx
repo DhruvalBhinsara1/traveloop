@@ -1,20 +1,24 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { useFocusEffect } from '@react-navigation/native';
-import type { ReactNode } from 'react';
-import { useCallback } from 'react';
-import { Alert, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { useCallback, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import Toast from 'react-native-toast-message';
 
+import { getErrorMessage } from '../../api/client';
+import { Screen } from '../../components/Screen';
 import { useAuth } from '../../context/AuthContext';
 import { useTrips } from '../../hooks/useTrips';
 import type { MainTabParamList } from '../../navigation/types';
-import { colors, fonts, radii, spacing } from '../../utils/theme';
+import { colors, fontFamily, radius, shadows, spacing, typography } from '../../theme';
 
 type Props = BottomTabScreenProps<MainTabParamList, 'Profile'>;
 
 export function ProfileScreen(_props: Props) {
-  const { user, signOut } = useAuth();
+  const { user, signOut, updateAvatar } = useAuth();
   const { stats, loadTrips } = useTrips();
+  const [avatarUploading, setAvatarUploading] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -22,13 +26,50 @@ export function ProfileScreen(_props: Props) {
     }, [loadTrips])
   );
 
-  const initials =
-    user?.name
-      ?.split(' ')
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase())
-      .join('') || 'TL';
+  const initials = useMemo(() => {
+    return (
+      user?.name
+        ?.split(' ')
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0]?.toUpperCase())
+        .join('') || 'TL'
+    );
+  }, [user?.name]);
+
+  const changeAvatar = async () => {
+    if (avatarUploading) return;
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Toast.show({ type: 'error', text1: 'Photo access needed', text2: 'Allow photo access to update your profile photo.' });
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.82
+    });
+
+    if (result.canceled || !result.assets[0]) return;
+
+    setAvatarUploading(true);
+    try {
+      const asset = result.assets[0];
+      await updateAvatar({
+        uri: asset.uri,
+        fileName: asset.fileName,
+        mimeType: asset.mimeType
+      });
+      Toast.show({ type: 'success', text1: 'Profile photo updated' });
+    } catch (error) {
+      Toast.show({ type: 'error', text1: 'Could not update photo', text2: getErrorMessage(error) });
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
 
   const confirmLogout = () => {
     Alert.alert('Log out?', 'You can log back in anytime.', [
@@ -38,38 +79,61 @@ export function ProfileScreen(_props: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.profileHeader}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials}</Text>
-          </View>
-          <Text style={styles.name}>{user?.name ?? 'Traveler'}</Text>
-          <Text style={styles.email}>{user?.email ?? 'Signed in'}</Text>
+    <Screen backgroundColor={colors.background} contentContainerStyle={styles.content}>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.eyebrow}>Account</Text>
+          <Text style={styles.title}>Profile</Text>
         </View>
-
-        <View style={styles.statRow}>
-          <ProfileStat label="Trips" value={`${stats.totalTrips}`} />
-          <ProfileStat label="Countries" value={`${stats.countries}`} />
-          <ProfileStat label="Soon" value={`${stats.upcoming}`} />
-        </View>
-
-        <Section title="Account">
-          <Row icon="person-outline" label="Edit Name" />
-          <Row icon="key-outline" label="Change Password" />
-        </Section>
-
-        <Section title="Travel">
-          <Row icon="globe-outline" label="Public Trips" />
-          <Row icon="download-outline" label="Export Plans" />
-        </Section>
-
-        <Pressable style={styles.logoutButton} onPress={confirmLogout}>
-          <Ionicons name="log-out-outline" size={20} color={colors.white} />
-          <Text style={styles.logoutText}>Log Out</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Log out" onPress={confirmLogout} style={styles.headerAction}>
+          <Ionicons name="log-out-outline" size={20} color={colors.charcoal} />
         </Pressable>
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+
+      <View style={styles.profileCard}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Change profile photo"
+          accessibilityState={{ disabled: avatarUploading, busy: avatarUploading }}
+          disabled={avatarUploading}
+          onPress={changeAvatar}
+          style={({ pressed }) => [styles.avatarWrap, pressed && styles.pressed]}
+        >
+          {user?.avatarUrl ? (
+            <Image source={{ uri: user.avatarUrl }} style={styles.avatarImage} />
+          ) : (
+            <View style={styles.avatarFallback}>
+              <Text style={styles.avatarText}>{initials}</Text>
+            </View>
+          )}
+          <View style={styles.cameraBadge}>
+            {avatarUploading ? <ActivityIndicator size="small" color={colors.white} /> : <Ionicons name="camera-outline" size={17} color={colors.white} />}
+          </View>
+        </Pressable>
+
+        <Text numberOfLines={1} style={styles.name}>{user?.name ?? 'Traveler'}</Text>
+        <Text numberOfLines={1} style={styles.email}>{user?.email ?? 'Signed in'}</Text>
+      </View>
+
+      <View style={styles.statRow}>
+        <ProfileStat label="Trips" value={`${stats.totalTrips}`} />
+        <ProfileStat label="Countries" value={`${stats.countries}`} />
+        <ProfileStat label="Soon" value={`${stats.upcoming}`} />
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Account</Text>
+        <View style={styles.sectionCard}>
+          <ActionRow icon="camera-outline" label="Change profile photo" onPress={changeAvatar} loading={avatarUploading} />
+          <InfoRow icon="mail-outline" label="Email" value={user?.email ?? 'Signed in'} />
+        </View>
+      </View>
+
+      <Pressable style={({ pressed }) => [styles.logoutButton, pressed && styles.pressed]} onPress={confirmLogout}>
+        <Ionicons name="log-out-outline" size={20} color={colors.white} />
+        <Text style={styles.logoutText}>Log Out</Text>
+      </Pressable>
+    </Screen>
   );
 }
 
@@ -82,120 +146,188 @@ function ProfileStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function ActionRow({
+  icon,
+  label,
+  onPress,
+  loading
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  loading?: boolean;
+}) {
   return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <View style={styles.sectionCard}>{children}</View>
-    </View>
-  );
-}
-
-function Row({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
-  return (
-    <Pressable style={styles.row}>
+    <Pressable disabled={loading} onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.pressed, loading && styles.disabled]}>
       <View style={styles.rowIcon}>
-        <Ionicons name={icon} size={19} color={colors.primary} />
+        {loading ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name={icon} size={19} color={colors.primary} />}
       </View>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Ionicons name="chevron-forward" size={19} color={colors.gray400} />
+      <Text style={[styles.rowLabel, styles.rowLabelGrow]}>{label}</Text>
+      <Ionicons name="chevron-forward" size={18} color={colors.gray400} />
     </Pressable>
   );
 }
 
+function InfoRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
+  return (
+    <View style={styles.row}>
+      <View style={styles.rowIcon}>
+        <Ionicons name={icon} size={19} color={colors.primary} />
+      </View>
+      <View style={styles.rowCopy}>
+        <Text style={styles.rowLabel}>{label}</Text>
+        <Text numberOfLines={1} style={styles.rowValue}>{value}</Text>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.white
-  },
   content: {
-    paddingHorizontal: 20,
-    paddingTop: spacing.lg,
-    paddingBottom: 110
+    paddingTop: 10,
+    paddingBottom: 118,
+    gap: 18
   },
-  profileHeader: {
+  header: {
+    minHeight: 56,
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.lg
+    justifyContent: 'space-between'
   },
-  avatar: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    backgroundColor: colors.primary,
+  eyebrow: {
+    color: colors.textMuted,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 12,
+    lineHeight: 16,
+    textTransform: 'uppercase'
+  },
+  title: {
+    color: colors.charcoal,
+    fontFamily: fontFamily.headingExtraBold,
+    fontSize: 28,
+    lineHeight: 34
+  },
+  headerAction: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: colors.primary,
-    shadowOpacity: 0.22,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 8
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border
+  },
+  profileCard: {
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: 18,
+    alignItems: 'center',
+    ...shadows.subtle
+  },
+  avatarWrap: {
+    width: 104,
+    height: 104,
+    borderRadius: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative'
+  },
+  avatarImage: {
+    width: 104,
+    height: 104,
+    borderRadius: 52
+  },
+  avatarFallback: {
+    width: 104,
+    height: 104,
+    borderRadius: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary
   },
   avatarText: {
-    fontFamily: fonts.heading,
     color: colors.white,
-    fontSize: 30
+    fontFamily: fontFamily.headingExtraBold,
+    fontSize: 30,
+    lineHeight: 36
+  },
+  cameraBadge: {
+    position: 'absolute',
+    right: 2,
+    bottom: 2,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    borderWidth: 3,
+    borderColor: colors.surface
   },
   name: {
-    marginTop: spacing.md,
-    fontFamily: fonts.heading,
+    marginTop: 14,
     color: colors.charcoal,
-    fontSize: 26
+    fontFamily: fontFamily.headingExtraBold,
+    fontSize: 24,
+    lineHeight: 30
   },
   email: {
-    marginTop: spacing.xs,
-    fontFamily: fonts.body,
-    color: colors.gray500,
-    fontSize: 14
+    color: colors.textMuted,
+    fontFamily: fontFamily.body,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 2
   },
   statRow: {
     flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.lg
+    gap: 10
   },
   profileStat: {
     flex: 1,
-    borderRadius: radii.lg,
-    backgroundColor: colors.gray50,
+    minHeight: 78,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: colors.gray100,
-    paddingVertical: spacing.md,
-    alignItems: 'center'
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
   profileStatValue: {
-    fontFamily: fonts.heading,
     color: colors.charcoal,
-    fontSize: 23
+    fontFamily: fontFamily.headingExtraBold,
+    fontSize: 24,
+    lineHeight: 30
   },
   profileStatLabel: {
-    marginTop: spacing.xs,
-    fontFamily: fonts.body,
-    color: colors.gray500,
-    fontSize: 12
+    color: colors.textMuted,
+    fontFamily: fontFamily.body,
+    fontSize: 12,
+    lineHeight: 16
   },
   section: {
-    marginTop: spacing.lg
+    gap: 8
   },
   sectionTitle: {
-    fontFamily: fonts.label,
-    color: colors.charcoal,
-    fontSize: 17,
-    marginBottom: spacing.sm
+    ...typography.label,
+    color: colors.charcoal
   },
   sectionCard: {
-    borderRadius: radii.lg,
-    backgroundColor: colors.gray50,
+    borderRadius: radius.card,
     borderWidth: 1,
-    borderColor: colors.gray100,
-    overflow: 'hidden'
+    borderColor: colors.border,
+    overflow: 'hidden',
+    backgroundColor: colors.surface
   },
   row: {
-    minHeight: 62,
-    paddingHorizontal: spacing.md,
+    minHeight: 64,
+    paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
+    gap: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.gray200
+    borderBottomColor: colors.border
   },
   rowIcon: {
     width: 36,
@@ -205,16 +337,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.primaryLight
   },
-  rowLabel: {
+  rowCopy: {
     flex: 1,
-    fontFamily: fonts.bodyMedium,
+    minWidth: 0
+  },
+  rowLabel: {
     color: colors.charcoal,
-    fontSize: 15
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 14,
+    lineHeight: 18
+  },
+  rowLabelGrow: {
+    flex: 1
+  },
+  rowValue: {
+    color: colors.textMuted,
+    fontFamily: fontFamily.body,
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2
   },
   logoutButton: {
-    marginTop: spacing.xl,
-    minHeight: 56,
-    borderRadius: radii.pill,
+    minHeight: 54,
+    borderRadius: radius.pill,
     backgroundColor: colors.charcoal,
     flexDirection: 'row',
     alignItems: 'center',
@@ -222,8 +367,16 @@ const styles = StyleSheet.create({
     gap: spacing.sm
   },
   logoutText: {
-    fontFamily: fonts.label,
     color: colors.white,
-    fontSize: 16
+    fontFamily: fontFamily.label,
+    fontSize: 15,
+    lineHeight: 20
+  },
+  pressed: {
+    opacity: 0.86,
+    transform: [{ scale: 0.98 }]
+  },
+  disabled: {
+    opacity: 0.6
   }
 });

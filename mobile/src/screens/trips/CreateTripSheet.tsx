@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Trip, TripInput } from '../../api/types';
 import { BottomSheet } from '../../components/BottomSheet';
@@ -24,6 +24,7 @@ export function CreateTripSheet({ visible, onClose, onSubmit, onCreated }: Props
   const [endDate, setEndDate] = useState(todayIso());
   const [budget, setBudget] = useState('');
   const [description, setDescription] = useState('');
+  const [isPublic, setIsPublic] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -54,12 +55,14 @@ export function CreateTripSheet({ visible, onClose, onSubmit, onCreated }: Props
         startDate,
         endDate,
         budget: parsedBudget,
-        coverImage: getDestinationImage(title)
+        coverImage: getDestinationImage(title),
+        isPublic
       });
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setTitle('');
       setBudget('');
       setDescription('');
+      setIsPublic(false);
       setError(null);
       onCreated?.(trip);
       onClose();
@@ -85,9 +88,24 @@ export function CreateTripSheet({ visible, onClose, onSubmit, onCreated }: Props
         placeholder="Cherry blossoms, ramen, and temples"
         multiline
       />
+      <View style={styles.privacyField}>
+        <Text style={styles.privacyLabel}>Visibility</Text>
+        <View style={styles.privacySegment}>
+          <VisibilityOption label="Private" active={!isPublic} onPress={() => setIsPublic(false)} />
+          <VisibilityOption label="Public" active={isPublic} onPress={() => setIsPublic(true)} />
+        </View>
+      </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Button label="Create Trip" icon="add-circle-outline" onPress={submit} loading={submitting} />
     </BottomSheet>
+  );
+}
+
+function VisibilityOption({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} onPress={onPress} style={[styles.privacyOption, active && styles.privacyOptionActive]}>
+      <Text style={[styles.privacyOptionText, active && styles.privacyOptionTextActive]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -104,5 +122,39 @@ const styles = StyleSheet.create({
   error: {
     ...typography.caption,
     color: colors.danger
+  },
+  privacyField: {
+    gap: 8
+  },
+  privacyLabel: {
+    ...typography.bodyMedium,
+    color: colors.charcoal
+  },
+  privacySegment: {
+    minHeight: 44,
+    borderRadius: 999,
+    padding: 4,
+    flexDirection: 'row',
+    backgroundColor: colors.gray100,
+    borderWidth: 1,
+    borderColor: colors.border
+  },
+  privacyOption: {
+    flex: 1,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  privacyOptionActive: {
+    backgroundColor: colors.primary
+  },
+  privacyOptionText: {
+    ...typography.bodyMedium,
+    color: colors.gray600,
+    fontSize: 13,
+    lineHeight: 17
+  },
+  privacyOptionTextActive: {
+    color: colors.white
   }
 });

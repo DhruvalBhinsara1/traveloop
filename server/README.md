@@ -21,6 +21,7 @@ Auth:
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `GET /api/auth/me`
+- `PATCH /api/auth/me/avatar` multipart `avatar` image upload to cloud storage
 
 Trips:
 
@@ -34,7 +35,7 @@ Trips:
 
 ## Cloud Image Storage
 
-Trip cover uploads are sent to Cloudinary from the server so API secrets never ship in the mobile app. Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in `server/.env`; leave real values out of Git.
+Trip cover and profile photo uploads are sent to Cloudinary from the server so API secrets never ship in the mobile app. Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in `server/.env`; leave real values out of Git.
 
 Stops:
 

@@ -22,6 +22,7 @@ import { calcStopSubtotal, calcTotal, formatMoney } from '../../utils/budgetCalc
 import { categoryIcon, getDestinationImage } from '../../utils/photos';
 import { formatDateRange, getTripDays, isUpcoming } from '../../utils/dateHelpers';
 import { CreateTripSheet } from '../trips/CreateTripSheet';
+import { TripDetailTabParamList } from '../../navigation/types';
 
 type Props = {
   navigation: any;
@@ -42,7 +43,8 @@ export function DashboardScreen({ navigation }: Props) {
   const [createVisible, setCreateVisible] = useState(false);
   const { width } = useWindowDimensions();
   const contentWidth = Math.max(0, width - CONTENT_PADDING * 2);
-  const recentCardWidth = Math.min(320, contentWidth * 0.88);
+  const recentCardWidth = Math.min(270, contentWidth * 0.76);
+  const placeCardWidth = Math.min(190, contentWidth * 0.5);
 
   const sortedTrips = useMemo(() => {
     return [...trips].sort((a, b) => getTripTime(b) - getTripTime(a));
@@ -58,18 +60,21 @@ export function DashboardScreen({ navigation }: Props) {
   const places = useMemo(() => getRealPlaces(sortedTrips), [sortedTrips]);
   const recentTrips = sortedTrips.filter((trip) => trip.id !== nextTrip?.id).slice(0, 4);
   const firstName = user?.name?.split(' ')[0] ?? 'Traveler';
-  const statsText = nextTrip
-    ? `${plural(trips.length, 'trip')} planned · ${plural(countCountries(trips), 'country')}`
-    : 'Start with one thoughtful itinerary.';
 
-  const openTrip = (trip: Trip) => navigation.navigate('TripDetail', { tripId: trip.id });
+  const openTrip = (trip: Trip, initialTab?: keyof TripDetailTabParamList) => navigation.navigate('TripDetail', { tripId: trip.id, initialTab });
   const openPlanningTool = (tool: PlanningToolKey) => {
     if (tool === 'new' || !nextTrip) {
       setCreateVisible(true);
       return;
     }
 
-    openTrip(nextTrip);
+    const tabMap: Record<Exclude<PlanningToolKey, 'new'>, keyof TripDetailTabParamList> = {
+      itinerary: 'Itinerary',
+      budget: 'Budget',
+      checklist: 'Checklist'
+    };
+
+    openTrip(nextTrip, tabMap[tool]);
   };
 
   return (
@@ -82,9 +87,9 @@ export function DashboardScreen({ navigation }: Props) {
       <View style={styles.header}>
         <View style={styles.headerCopy}>
           <Text numberOfLines={1} style={styles.greeting}>
-            Hi, {firstName}
+            Hi, {firstName} 👋
           </Text>
-          <Text numberOfLines={1} style={styles.subtitle}>{statsText}</Text>
+          <Text numberOfLines={1} style={styles.subtitle}>Where are we planning next?</Text>
         </View>
         <Pressable
           accessibilityLabel="Open profile"
@@ -124,7 +129,7 @@ export function DashboardScreen({ navigation }: Props) {
           >
             {recentTrips.map((trip) => (
               <View key={trip.id} style={[styles.recentCard, { width: recentCardWidth }]}>
-                <TripCard trip={trip} height={172} onPress={() => openTrip(trip)} />
+                <TripCard trip={trip} height={132} onPress={() => openTrip(trip)} />
               </View>
             ))}
           </ScrollView>
@@ -134,11 +139,17 @@ export function DashboardScreen({ navigation }: Props) {
       {places.length ? (
         <View style={styles.section}>
           <DashboardSectionHeader title="Places From Your Trips" />
-          <View style={styles.placeList}>
-            {places.slice(0, 4).map(({ stop, trip }) => (
-              <PlaceRow key={`${trip.id}-${stop.id}`} place={stop} trip={trip} onPress={() => openTrip(trip)} />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.horizontalList}
+          >
+            {places.slice(0, 8).map(({ stop, trip }) => (
+              <View key={`${trip.id}-${stop.id}`} style={[styles.placeCardWrap, { width: placeCardWidth }]}>
+                <PlaceCard place={stop} trip={trip} onPress={() => openTrip(trip)} />
+              </View>
             ))}
-          </View>
+          </ScrollView>
         </View>
       ) : null}
 
@@ -146,7 +157,7 @@ export function DashboardScreen({ navigation }: Props) {
         visible={createVisible}
         onClose={() => setCreateVisible(false)}
         onSubmit={createTrip}
-        onCreated={(trip) => navigation.navigate('TripDetail', { tripId: trip.id })}
+        onCreated={(trip) => navigation.navigate('TripDetail', { tripId: trip.id, initialTab: 'Itinerary' })}
       />
     </Screen>
   );
@@ -351,22 +362,24 @@ function PlanningTools({
   );
 }
 
-function PlaceRow({ place, trip, onPress }: { place: Stop; trip: Trip; onPress: () => void }) {
+function PlaceCard({ place, trip, onPress }: { place: Stop; trip: Trip; onPress: () => void }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Open ${trip.title} from ${place.cityName}`}
       onPress={onPress}
-      style={({ pressed }) => [styles.placeRow, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.placeCard, pressed && styles.pressed]}
     >
       <Image source={{ uri: getDestinationImage(place.cityName) }} style={styles.placeImage} />
-      <View style={styles.grow}>
+      <View style={styles.placeCardCopy}>
         <Text numberOfLines={1} style={styles.placeTitle}>{place.cityName}</Text>
         <Text numberOfLines={1} style={styles.placeMeta}>
           {place.country} · {trip.title}
         </Text>
       </View>
-      <Ionicons name="chevron-forward" size={18} color={colors.gray400} />
+      <View style={styles.placeArrow}>
+        <Ionicons name="arrow-forward" size={15} color={colors.primary} />
+      </View>
     </Pressable>
   );
 }
@@ -408,10 +421,6 @@ function MetricChip({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; lab
 
 function getTripTime(trip: Trip) {
   return new Date(trip.updatedAt ?? trip.createdAt ?? trip.startDate).getTime();
-}
-
-function countCountries(trips: Trip[]) {
-  return new Set(trips.flatMap((trip) => trip.stops.map((stop) => stop.country).filter(Boolean))).size;
 }
 
 function getRealPlaces(trips: Trip[]): PlacePreview[] {
@@ -489,8 +498,8 @@ const styles = StyleSheet.create({
     lineHeight: 20
   },
   nextCard: {
-    height: 166,
-    marginTop: 14,
+    height: 204,
+    marginTop: 18,
     borderRadius: radius.card,
     overflow: 'hidden',
     backgroundColor: colors.gray100,
@@ -503,7 +512,7 @@ const styles = StyleSheet.create({
   },
   nextOverlay: {
     flex: 1,
-    padding: 14
+    padding: 16
   },
   nextTopRow: {
     flexDirection: 'row',
@@ -534,17 +543,17 @@ const styles = StyleSheet.create({
   },
   nextCopy: {
     position: 'absolute',
-    left: 14,
-    right: 14,
-    bottom: 62,
-    gap: 4
+    left: 16,
+    right: 16,
+    bottom: 70,
+    gap: 6
   },
   nextTitle: {
     color: colors.white,
     fontFamily: fontFamily.headingExtraBold,
-    fontSize: 21,
+    fontSize: 24,
     fontWeight: typography.weight.extrabold,
-    lineHeight: 26,
+    lineHeight: 30,
     textShadowColor: 'rgba(0,0,0,0.22)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 5
@@ -587,12 +596,12 @@ const styles = StyleSheet.create({
   },
   continuePill: {
     position: 'absolute',
-    left: 14,
-    right: 14,
-    bottom: 14,
-    height: 42,
-    borderRadius: 21,
-    paddingHorizontal: 16,
+    left: 16,
+    right: 16,
+    bottom: 16,
+    height: 46,
+    borderRadius: 23,
+    paddingHorizontal: 18,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -601,8 +610,8 @@ const styles = StyleSheet.create({
   continueText: {
     color: colors.charcoal,
     fontFamily: fontFamily.headingBold,
-    fontSize: 14,
-    lineHeight: 18
+    fontSize: 15,
+    lineHeight: 20
   },
   emptyJourneyCard: {
     minHeight: 166,
@@ -831,27 +840,31 @@ const styles = StyleSheet.create({
     paddingRight: CONTENT_PADDING
   },
   recentCard: {
-    height: 172
+    height: 132
   },
-  placeList: {
-    gap: 8
+  placeCardWrap: {
+    height: 148
   },
-  placeRow: {
-    minHeight: 64,
+  placeCard: {
+    flex: 1,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
     padding: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10
+    position: 'relative',
+    ...shadows.subtle
   },
   placeImage: {
-    width: 48,
-    height: 48,
+    width: '100%',
+    height: 78,
     borderRadius: radius.md,
     backgroundColor: colors.primaryLight
+  },
+  placeCardCopy: {
+    marginTop: 8,
+    paddingRight: 30,
+    gap: 1
   },
   placeTitle: {
     color: colors.charcoal,
@@ -864,6 +877,17 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.body,
     fontSize: 12,
     lineHeight: 16
+  },
+  placeArrow: {
+    position: 'absolute',
+    right: 8,
+    bottom: 10,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryLight
   },
   grow: {
     flex: 1,

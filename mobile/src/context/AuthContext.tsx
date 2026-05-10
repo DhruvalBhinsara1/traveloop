@@ -5,12 +5,19 @@ import { authApi } from '../api/auth';
 import { AUTH_TOKEN_KEY, LEGACY_AUTH_TOKEN_KEY } from '../api/client';
 import { User } from '../api/types';
 
+type AvatarUpload = {
+  uri: string;
+  fileName?: string | null;
+  mimeType?: string | null;
+};
+
 type AuthContextValue = {
   user: User | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  updateAvatar: (image: AvatarUpload) => Promise<User>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -59,6 +66,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut: async () => {
         await AsyncStorage.multiRemove([AUTH_TOKEN_KEY, LEGACY_AUTH_TOKEN_KEY]);
         setUser(null);
+      },
+      updateAvatar: async (image) => {
+        const profile = await authApi.updateAvatar(image);
+        setUser(profile);
+        return profile;
       }
     }),
     [loading, user]

@@ -27,7 +27,7 @@ npm --prefix server run dev
 npm --prefix mobile run start
 ```
 
-Trip thumbnail uploads use Cloudinary. Add `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` to `server/.env` for cover editing; keep the real values local.
+Trip thumbnail and profile photo uploads use Cloudinary. Add `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` to `server/.env` for image editing; keep the real values local.
 
 For a phone demo, run Expo with tunnel mode from `mobile/`:
 

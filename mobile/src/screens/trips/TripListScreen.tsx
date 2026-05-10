@@ -81,7 +81,7 @@ export function TripListScreen({ navigation }: Props) {
         visible={createVisible}
         onClose={() => setCreateVisible(false)}
         onSubmit={createTrip}
-        onCreated={(trip) => navigation.navigate('TripDetail', { tripId: trip.id })}
+        onCreated={(trip) => navigation.navigate('TripDetail', { tripId: trip.id, initialTab: 'Itinerary' })}
       />
     </Screen>
   );

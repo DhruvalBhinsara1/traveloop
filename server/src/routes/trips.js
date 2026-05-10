@@ -58,6 +58,7 @@ tripsRouter.get('/', asyncHandler(async (req, res) => {
 tripsRouter.post('/', asyncHandler(async (req, res) => {
   const { title, description, startDate, endDate, budget, coverImage } = req.body;
   const { start, end } = validateTrip(req.body);
+  const isPublic = req.body.isPublic === true || req.body.isPublic === 'true';
 
   const trip = await prisma.trip.create({
     data: {
@@ -67,6 +68,8 @@ tripsRouter.post('/', asyncHandler(async (req, res) => {
       budget: budget === undefined || budget === null || budget === '' ? null : Number(budget),
       startDate: start,
       endDate: end,
+      isPublic,
+      shareToken: isPublic ? uuid() : null,
       userId: req.user.id,
       checklist: {
         create: [
@@ -89,10 +92,14 @@ tripsRouter.get('/:id', asyncHandler(async (req, res) => {
 
 tripsRouter.put('/:id', asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
-  await getOwnedTrip(id, req.user.id);
+  const existing = await getOwnedTrip(id, req.user.id);
 
   const { title, description, startDate, endDate, budget, coverImage } = req.body;
   const { start, end } = validateTrip(req.body);
+  const nextIsPublic =
+    req.body.isPublic === undefined
+      ? undefined
+      : req.body.isPublic === true || req.body.isPublic === 'true';
 
   const trip = await prisma.trip.update({
     where: { id },
@@ -102,7 +109,13 @@ tripsRouter.put('/:id', asyncHandler(async (req, res) => {
       coverImage: coverImage?.trim() || null,
       budget: budget === undefined || budget === null || budget === '' ? null : Number(budget),
       startDate: start,
-      endDate: end
+      endDate: end,
+      ...(nextIsPublic === undefined
+        ? {}
+        : {
+            isPublic: nextIsPublic,
+            shareToken: nextIsPublic ? existing.shareToken ?? uuid() : null
+          })
     },
     include: nestedTripInclude
   });

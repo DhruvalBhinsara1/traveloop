@@ -16,7 +16,7 @@ export type RootStackParamList = {
   Signup: undefined;
   MainTabs: undefined;
   CreateTrip: undefined;
-  TripDetail: { tripId: number };
+  TripDetail: { tripId: number; initialTab?: keyof TripDetailTabParamList };
   PublicTrip: { shareToken: string };
 };
 

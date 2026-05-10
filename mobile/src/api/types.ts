@@ -80,6 +80,7 @@ export type TripInput = {
   endDate: string;
   budget?: number | null;
   coverImage?: string | null;
+  isPublic?: boolean;
 };
 
 export type StopInput = {

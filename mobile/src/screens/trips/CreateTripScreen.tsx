@@ -42,6 +42,7 @@ export function CreateTripScreen({ navigation }: Props) {
   const [budget, setBudget] = useState('');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(defaultEnd);
+  const [isPublic, setIsPublic] = useState(false);
   const [pickerField, setPickerField] = useState<DateField | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<ValidationErrors<'title' | 'startDate' | 'endDate' | 'budget'>>({});
@@ -53,7 +54,8 @@ export function CreateTripScreen({ navigation }: Props) {
       description: description.trim() || undefined,
       startDate: toIsoDate(startDate),
       endDate: toIsoDate(endDate),
-      budget: parsedBudget
+      budget: parsedBudget,
+      isPublic
     };
     const nextErrors = validateTrip(payload);
     setErrors(nextErrors);
@@ -66,7 +68,7 @@ export function CreateTripScreen({ navigation }: Props) {
       const trip = await tripsApi.create(payload);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       Toast.show({ type: 'success', text1: 'Trip created', text2: trip.title });
-      navigation.replace('TripDetail', { tripId: trip.id });
+      navigation.replace('TripDetail', { tripId: trip.id, initialTab: 'Itinerary' });
     } catch (error) {
       Toast.show({ type: 'error', text1: 'Could not create trip', text2: getApiErrorMessage(error) });
     } finally {
@@ -161,6 +163,14 @@ export function CreateTripScreen({ navigation }: Props) {
             />
           </View>
 
+          <View style={styles.field}>
+            <Text style={styles.label}>Visibility</Text>
+            <View style={styles.privacySegment}>
+              <VisibilityButton label="Private" active={!isPublic} onPress={() => setIsPublic(false)} />
+              <VisibilityButton label="Public" active={isPublic} onPress={() => setIsPublic(true)} />
+            </View>
+          </View>
+
           <Pressable
             onPress={submit}
             disabled={isSubmitting}
@@ -178,6 +188,14 @@ export function CreateTripScreen({ navigation }: Props) {
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+  );
+}
+
+function VisibilityButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} onPress={onPress} style={[styles.privacyOption, active && styles.privacyOptionActive]}>
+      <Text style={[styles.privacyOptionText, active && styles.privacyOptionTextActive]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -347,6 +365,32 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.72
+  },
+  privacySegment: {
+    minHeight: 46,
+    borderRadius: radii.pill,
+    padding: 4,
+    flexDirection: 'row',
+    backgroundColor: colors.gray100,
+    borderWidth: 1,
+    borderColor: colors.gray200
+  },
+  privacyOption: {
+    flex: 1,
+    borderRadius: radii.pill,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  privacyOptionActive: {
+    backgroundColor: colors.primary
+  },
+  privacyOptionText: {
+    fontFamily: fonts.bodyMedium,
+    color: colors.gray600,
+    fontSize: 13
+  },
+  privacyOptionTextActive: {
+    color: colors.white
   },
   primaryButtonText: {
     fontFamily: fonts.label,

@@ -4,7 +4,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ImageBackground, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { PieChart } from 'react-native-gifted-charts';
 import Toast from 'react-native-toast-message';
@@ -14,27 +14,30 @@ import { checklistApi } from '../../api/checklist';
 import { getErrorMessage } from '../../api/client';
 import { stopsApi } from '../../api/stops';
 import { tripsApi } from '../../api/trips';
-import { Activity, ActivityInput, ChecklistItem, Stop, StopInput, Trip } from '../../api/types';
+import { Activity, ActivityCategory, ActivityInput, ChecklistItem, Stop, StopInput, Trip } from '../../api/types';
 import { Button } from '../../components/Button';
 import { ProgressBar } from '../../components/ProgressBar';
-import { colors, typography } from '../../theme';
-import { calcByCategory, calcStopSubtotal, calcTotal, formatMoney } from '../../utils/budgetCalc';
-import { formatDateRange, getTripDays, nightsBetween } from '../../utils/dateHelpers';
+import { colors, fontFamily, radius, shadows, typography } from '../../theme';
+import {
+  CATEGORY_COLORS,
+  CATEGORY_ICONS,
+  CATEGORY_LABELS,
+  calcByCategory,
+  calcStopSubtotal,
+  calcTotal,
+  formatMoney,
+  sortActivitiesByDate
+} from '../../utils/budgetCalc';
+import { formatDate, formatDateRange, getTripDays, nightsBetween } from '../../utils/dateHelpers';
 import { getDestinationImage } from '../../utils/photos';
 import { shareTrip } from '../../utils/shareHelpers';
-import { RootStackParamList } from '../../navigation/types';
+import { RootStackParamList, TripDetailTabParamList } from '../../navigation/types';
 import { AddActivitySheet } from './AddActivitySheet';
 import { AddStopSheet } from './AddStopSheet';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripDetail'>;
-type TripTabParamList = {
-  Itinerary: undefined;
-  Budget: undefined;
-  Checklist: undefined;
-  Notes: undefined;
-};
 
-const Tab = createMaterialTopTabNavigator<TripTabParamList>();
+const Tab = createMaterialTopTabNavigator<TripDetailTabParamList>();
 
 const starterChecklist = [
   { label: 'Passport', category: 'documents' },
@@ -53,6 +56,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const [stopSheetVisible, setStopSheetVisible] = useState(false);
   const [activityStop, setActivityStop] = useState<Stop | null>(null);
   const [coverUploading, setCoverUploading] = useState(false);
+  const [privacyUpdating, setPrivacyUpdating] = useState(false);
 
   const loadTrip = useCallback(async () => {
     try {
@@ -169,12 +173,37 @@ export function TripDetailScreen({ route, navigation }: Props) {
     if (!trip) return;
 
     try {
-      const shareState = await tripsApi.share(trip.id, true);
+      const shareState = trip.isPublic && trip.shareToken
+        ? { id: trip.id, isPublic: trip.isPublic, shareToken: trip.shareToken }
+        : await tripsApi.share(trip.id, true);
       const publicTrip = { ...trip, isPublic: shareState.isPublic, shareToken: shareState.shareToken };
       setTrip(publicTrip);
       await shareTrip(publicTrip);
     } catch (error) {
       Toast.show({ type: 'error', text1: 'Could not share trip', text2: getErrorMessage(error) });
+    }
+  };
+
+  const updateVisibility = async (isPublic: boolean) => {
+    if (!trip || privacyUpdating || trip.isPublic === isPublic) return;
+
+    setPrivacyUpdating(true);
+    try {
+      const shareState = await tripsApi.share(trip.id, isPublic);
+      setTrip((current) =>
+        current
+          ? {
+              ...current,
+              isPublic: shareState.isPublic,
+              shareToken: shareState.shareToken
+            }
+          : current
+      );
+      Toast.show({ type: 'success', text1: isPublic ? 'Trip is public' : 'Trip is private' });
+    } catch (error) {
+      Toast.show({ type: 'error', text1: 'Could not update privacy', text2: getErrorMessage(error) });
+    } finally {
+      setPrivacyUpdating(false);
     }
   };
 
@@ -294,9 +323,12 @@ export function TripDetailScreen({ route, navigation }: Props) {
           <DetailMeta icon="sparkles-outline" label={`${activityCount} ${activityCount === 1 ? 'activity' : 'activities'}`} />
           <DetailMeta icon={trip.isPublic ? 'globe-outline' : 'lock-closed-outline'} label={trip.isPublic ? 'Public' : 'Private'} />
         </View>
+        <PrivacySegment isPublic={trip.isPublic} loading={privacyUpdating} onChange={updateVisibility} />
       </View>
 
       <Tab.Navigator
+        key={`${trip.id}-${route.params.initialTab ?? 'Itinerary'}`}
+        initialRouteName={route.params.initialTab ?? 'Itinerary'}
         screenOptions={{
           tabBarActiveTintColor: colors.primary,
           tabBarInactiveTintColor: colors.gray600,
@@ -353,6 +385,44 @@ function DetailMeta({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; lab
   );
 }
 
+function PrivacySegment({
+  isPublic,
+  loading,
+  onChange
+}: {
+  isPublic: boolean;
+  loading: boolean;
+  onChange: (isPublic: boolean) => void;
+}) {
+  return (
+    <View style={styles.privacySegment}>
+      {[
+        { label: 'Private', value: false, icon: 'lock-closed-outline' },
+        { label: 'Public', value: true, icon: 'globe-outline' }
+      ].map((item) => {
+        const active = isPublic === item.value;
+        return (
+          <Pressable
+            key={item.label}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active, disabled: loading }}
+            disabled={loading}
+            onPress={() => onChange(item.value)}
+            style={[styles.privacyOption, active && styles.privacyOptionActive]}
+          >
+            {loading && active ? (
+              <ActivityIndicator size="small" color={colors.white} />
+            ) : (
+              <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={15} color={active ? colors.white : colors.gray600} />
+            )}
+            <Text style={[styles.privacyOptionText, active && styles.privacyOptionTextActive]}>{item.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function ItineraryTab({
   trip,
   onAddStop,
@@ -369,74 +439,193 @@ function ItineraryTab({
   onDeleteActivity: (activity: Activity) => void;
 }) {
   const stops = [...trip.stops].sort((a, b) => a.order - b.order);
+  const [managedStopId, setManagedStopId] = useState<number | null>(null);
 
   return (
     <ScrollView contentContainerStyle={styles.tabContent}>
-      {trip.description ? <Text style={styles.body}>{trip.description}</Text> : null}
+      {trip.description ? (
+        <View style={styles.itineraryNote}>
+          <Ionicons name="reader-outline" size={18} color={colors.primary} />
+          <Text style={styles.body}>{trip.description}</Text>
+        </View>
+      ) : null}
 
       {stops.length ? (
-        <>
+        <View style={styles.itineraryTimeline}>
           {stops.map((stop, index) => (
-            <View key={stop.id} style={styles.stopCard}>
-              <View style={styles.stopHeader}>
-                <View style={styles.stopTitleWrap}>
-                  <Ionicons name="location-outline" size={20} color={colors.primary} />
-                  <View style={styles.grow}>
-                    <Text style={styles.stopTitle}>{stop.cityName}, {stop.country}</Text>
-                    <Text style={styles.meta}>
-                      {formatDateRange(stop.arrivalDate, stop.departDate)} - {nightsBetween(stop.arrivalDate, stop.departDate)} nights
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.rowActions}>
-                  <MiniButton icon="arrow-up-outline" disabled={index === 0} onPress={() => onMoveStop(stop, -1)} />
-                  <MiniButton icon="arrow-down-outline" disabled={index === stops.length - 1} onPress={() => onMoveStop(stop, 1)} />
-                  <MiniButton icon="trash-outline" danger onPress={() => onDeleteStop(stop)} />
-                </View>
-              </View>
-
-              <View style={styles.activityList}>
-                {stop.activities.map((activity) => (
-                  <View key={activity.id} style={styles.activityRow}>
-                    <View style={styles.activityIcon}>
-                      <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
-                    </View>
-                    <View style={styles.grow}>
-                      <Text style={styles.itemTitle}>{activity.name}</Text>
-                      <Text style={styles.meta}>{activity.category}</Text>
-                    </View>
-                    <Text style={styles.cost}>{formatMoney(activity.cost)}</Text>
-                    <Pressable onPress={() => onDeleteActivity(activity)} hitSlop={10}>
-                      <Ionicons name="close-circle" size={20} color={colors.gray400} />
-                    </Pressable>
-                  </View>
-                ))}
-              </View>
-
-              <View style={styles.stopFooter}>
-                <Pressable onPress={() => onAddActivity(stop)} style={styles.inlineAdd}>
-                  <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
-                  <Text style={styles.inlineAddText}>Add Activity</Text>
-                </Pressable>
-                <Text style={styles.meta}>Subtotal: {formatMoney(calcStopSubtotal(stop))}</Text>
-              </View>
-            </View>
+            <StopTimelineItem
+              index={index}
+              isLast={false}
+              isManaged={managedStopId === stop.id}
+              key={stop.id}
+              onAddActivity={() => onAddActivity(stop)}
+              onDeleteActivity={onDeleteActivity}
+              onDeleteStop={() => onDeleteStop(stop)}
+              onMoveDown={() => onMoveStop(stop, 1)}
+              onMoveUp={() => onMoveStop(stop, -1)}
+              onToggleManage={() => setManagedStopId((current) => (current === stop.id ? null : stop.id))}
+              stop={stop}
+              canMoveDown={index < stops.length - 1}
+              canMoveUp={index > 0}
+            />
           ))}
-          <Pressable onPress={onAddStop} style={({ pressed }) => [styles.addStopRow, pressed && styles.pressedRow]}>
-            <View style={styles.addStopIcon}>
-              <Ionicons name="location-outline" size={18} color={colors.primary} />
+          <Pressable onPress={onAddStop} style={({ pressed }) => [styles.addTimelineItem, pressed && styles.pressedRow]}>
+            <View style={styles.timelineMarkerColumn}>
+              <View style={styles.addTimelineMarker}>
+                <Ionicons name="add" size={18} color={colors.primary} />
+              </View>
             </View>
-            <View style={styles.grow}>
-              <Text style={styles.itemTitle}>Add another stop</Text>
-              <Text style={styles.meta}>Extend this itinerary with the next city.</Text>
+            <View style={styles.addTimelineCard}>
+              <Text style={styles.itemTitle}>Add next stop</Text>
+              <Text style={styles.meta}>Extend the route with another city.</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.gray400} />
           </Pressable>
-        </>
+        </View>
       ) : (
         <EmptyPanel title="No stops yet" body="Add a city stop to start building your timeline." actionLabel="Add Stop" onAction={onAddStop} />
       )}
     </ScrollView>
+  );
+}
+
+function StopTimelineItem({
+  stop,
+  index,
+  isLast,
+  isManaged,
+  canMoveUp,
+  canMoveDown,
+  onAddActivity,
+  onDeleteActivity,
+  onDeleteStop,
+  onMoveDown,
+  onMoveUp,
+  onToggleManage
+}: {
+  stop: Stop;
+  index: number;
+  isLast: boolean;
+  isManaged: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onAddActivity: () => void;
+  onDeleteActivity: (activity: Activity) => void;
+  onDeleteStop: () => void;
+  onMoveDown: () => void;
+  onMoveUp: () => void;
+  onToggleManage: () => void;
+}) {
+  const activities = sortActivitiesByDate(stop.activities ?? []);
+  const subtotal = calcStopSubtotal(stop);
+
+  return (
+    <View style={styles.timelineStopItem}>
+      <View style={styles.timelineMarkerColumn}>
+        {!isLast ? <View style={styles.timelineConnector} /> : null}
+        <View style={styles.stopNumberMarker}>
+          <Text style={styles.stopNumberText}>{String(index + 1).padStart(2, '0')}</Text>
+        </View>
+      </View>
+
+      <View style={styles.stopTimelineCard}>
+        <View style={styles.stopCardTop}>
+          <View style={styles.grow}>
+            <Text numberOfLines={1} style={styles.stopTimelineTitle}>{stop.cityName}</Text>
+            <Text numberOfLines={1} style={styles.stopTimelineMeta}>
+              {stop.country} · {formatDateRange(stop.arrivalDate, stop.departDate)} · {nightsBetween(stop.arrivalDate, stop.departDate)} nights
+            </Text>
+          </View>
+          <View style={styles.stopSummary}>
+            <Text style={styles.stopSubtotal}>{subtotal ? formatMoney(subtotal) : 'Open'}</Text>
+            <Pressable accessibilityRole="button" onPress={onToggleManage} style={styles.manageButton}>
+              <Ionicons name="ellipsis-horizontal" size={18} color={colors.charcoal} />
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.stopStatsRow}>
+          <View style={styles.stopStatChip}>
+            <Ionicons name="sparkles-outline" size={13} color={colors.primary} />
+            <Text style={styles.stopStatText}>{activities.length} {activities.length === 1 ? 'activity' : 'activities'}</Text>
+          </View>
+          <View style={styles.stopStatChip}>
+            <Ionicons name="moon-outline" size={13} color={colors.primary} />
+            <Text style={styles.stopStatText}>{nightsBetween(stop.arrivalDate, stop.departDate)} nights</Text>
+          </View>
+        </View>
+
+        {isManaged ? (
+          <View style={styles.managePanel}>
+            <ManageAction icon="arrow-up-outline" label="Move up" disabled={!canMoveUp} onPress={onMoveUp} />
+            <ManageAction icon="arrow-down-outline" label="Move down" disabled={!canMoveDown} onPress={onMoveDown} />
+            <ManageAction icon="trash-outline" label="Delete" danger onPress={onDeleteStop} />
+          </View>
+        ) : null}
+
+        <View style={styles.activityTimelineList}>
+          {activities.length ? (
+            activities.map((activity) => (
+              <ActivityTimelineRow key={activity.id} activity={activity} onDelete={() => onDeleteActivity(activity)} />
+            ))
+          ) : (
+            <View style={styles.emptyActivityRow}>
+              <Text style={styles.meta}>No activities yet</Text>
+            </View>
+          )}
+        </View>
+
+        <Pressable onPress={onAddActivity} style={({ pressed }) => [styles.addActivityInline, pressed && styles.pressedRow]}>
+          <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+          <Text style={styles.inlineAddText}>Add Activity</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function ActivityTimelineRow({ activity, onDelete }: { activity: Activity; onDelete: () => void }) {
+  const meta = getActivityMeta(activity.category);
+  const detail = [
+    meta.label,
+    activity.date ? formatDate(activity.date) : null,
+    activity.duration ? `${activity.duration} min` : null
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <View style={styles.activityTimelineRow}>
+      <View style={[styles.activityTimelineIcon, { backgroundColor: withAlpha(meta.color, 0.12) }]}>
+        <Ionicons name={meta.icon} size={16} color={meta.color} />
+      </View>
+      <View style={styles.grow}>
+        <Text numberOfLines={1} style={styles.activityTimelineTitle}>{activity.name}</Text>
+        <Text numberOfLines={1} style={styles.activityTimelineMeta}>{detail}</Text>
+      </View>
+      <Text style={styles.activityTimelineCost}>{Number(activity.cost) ? formatMoney(activity.cost) : 'Free'}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel={`Delete ${activity.name}`} onPress={onDelete} hitSlop={10}>
+        <Ionicons name="close-circle" size={19} color={colors.gray400} />
+      </Pressable>
+    </View>
+  );
+}
+
+function ManageAction({
+  icon,
+  label,
+  onPress,
+  danger,
+  disabled
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable disabled={disabled} onPress={onPress} style={[styles.manageAction, disabled && styles.disabled]}>
+      <Ionicons name={icon} size={15} color={danger ? colors.danger : colors.gray600} />
+      <Text style={[styles.manageActionText, danger && styles.manageActionDanger]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -587,24 +776,6 @@ function NotesTab({ trip, onSave }: { trip: Trip; onSave: (content: string) => P
   );
 }
 
-function MiniButton({
-  icon,
-  onPress,
-  disabled,
-  danger
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  onPress: () => void;
-  disabled?: boolean;
-  danger?: boolean;
-}) {
-  return (
-    <Pressable disabled={disabled} onPress={onPress} style={[styles.miniButton, disabled && styles.disabled]}>
-      <Ionicons name={icon} size={16} color={danger ? colors.danger : colors.gray600} />
-    </Pressable>
-  );
-}
-
 function EmptyPanel({
   title,
   body,
@@ -637,6 +808,25 @@ function sortTrip(trip: Trip): Trip {
     checklist: trip.checklist ?? [],
     notes: trip.notes ?? []
   };
+}
+
+function getActivityMeta(category: string) {
+  const key = (category in CATEGORY_LABELS ? category : 'other') as ActivityCategory;
+  return {
+    color: CATEGORY_COLORS[key],
+    icon: CATEGORY_ICONS[key],
+    label: CATEGORY_LABELS[key]
+  };
+}
+
+function withAlpha(hex: string, alpha: number) {
+  const normalized = hex.replace('#', '');
+  if (normalized.length !== 6) return colors.primaryLight;
+
+  const r = Number.parseInt(normalized.slice(0, 2), 16);
+  const g = Number.parseInt(normalized.slice(2, 4), 16);
+  const b = Number.parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 const styles = StyleSheet.create({
@@ -689,8 +879,8 @@ const styles = StyleSheet.create({
   },
   detailCard: {
     marginTop: -30,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: radius.bottomSheet,
+    borderTopRightRadius: radius.bottomSheet,
     backgroundColor: colors.white,
     paddingHorizontal: 20,
     paddingTop: 22,
@@ -730,6 +920,35 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.gray600,
     flexShrink: 1
+  },
+  privacySegment: {
+    minHeight: 44,
+    borderRadius: radius.pill,
+    padding: 4,
+    flexDirection: 'row',
+    backgroundColor: colors.gray100,
+    borderWidth: 1,
+    borderColor: colors.border
+  },
+  privacyOption: {
+    flex: 1,
+    borderRadius: radius.pill,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6
+  },
+  privacyOptionActive: {
+    backgroundColor: colors.primary
+  },
+  privacyOptionText: {
+    ...typography.bodyMedium,
+    color: colors.gray600,
+    fontSize: 13,
+    lineHeight: 17
+  },
+  privacyOptionTextActive: {
+    color: colors.white
   },
   header: {
     minHeight: 70,
@@ -774,7 +993,8 @@ const styles = StyleSheet.create({
   tabContent: {
     padding: 20,
     paddingBottom: 36,
-    gap: 16
+    gap: 16,
+    backgroundColor: colors.background
   },
   title: {
     ...typography.h1
@@ -784,6 +1004,227 @@ const styles = StyleSheet.create({
   },
   meta: {
     ...typography.caption
+  },
+  itineraryNote: {
+    minHeight: 54,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10
+  },
+  itineraryTimeline: {
+    gap: 14
+  },
+  timelineStopItem: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'stretch'
+  },
+  timelineMarkerColumn: {
+    width: 38,
+    alignItems: 'center',
+    position: 'relative'
+  },
+  timelineConnector: {
+    position: 'absolute',
+    top: 24,
+    bottom: -14,
+    width: 2,
+    borderRadius: 1,
+    backgroundColor: colors.border
+  },
+  stopNumberMarker: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    borderWidth: 3,
+    borderColor: colors.background
+  },
+  stopNumberText: {
+    color: colors.white,
+    fontFamily: fontFamily.headingBold,
+    fontSize: 11,
+    lineHeight: 14
+  },
+  stopTimelineCard: {
+    flex: 1,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: 14,
+    gap: 12,
+    ...shadows.subtle
+  },
+  stopCardTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12
+  },
+  stopTimelineTitle: {
+    color: colors.charcoal,
+    fontFamily: fontFamily.headingBold,
+    fontSize: 18,
+    lineHeight: 23
+  },
+  stopTimelineMeta: {
+    ...typography.caption,
+    color: colors.gray600,
+    marginTop: 2
+  },
+  stopSummary: {
+    alignItems: 'flex-end',
+    gap: 6
+  },
+  stopSubtotal: {
+    color: colors.charcoal,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 13,
+    lineHeight: 17
+  },
+  manageButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.gray100
+  },
+  stopStatsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8
+  },
+  stopStatChip: {
+    minHeight: 28,
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.primaryLight
+  },
+  stopStatText: {
+    color: colors.primary,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 12,
+    lineHeight: 16
+  },
+  managePanel: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.gray50,
+    padding: 6,
+    flexDirection: 'row',
+    gap: 6
+  },
+  manageAction: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 5,
+    backgroundColor: colors.surface
+  },
+  manageActionText: {
+    color: colors.gray600,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 11,
+    lineHeight: 14
+  },
+  manageActionDanger: {
+    color: colors.danger
+  },
+  activityTimelineList: {
+    borderTopWidth: 1,
+    borderTopColor: colors.gray100
+  },
+  activityTimelineRow: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.gray100
+  },
+  activityTimelineIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  activityTimelineTitle: {
+    color: colors.charcoal,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 14,
+    lineHeight: 18
+  },
+  activityTimelineMeta: {
+    color: colors.gray600,
+    fontFamily: fontFamily.body,
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 1
+  },
+  activityTimelineCost: {
+    color: colors.charcoal,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 13,
+    lineHeight: 17
+  },
+  emptyActivityRow: {
+    minHeight: 48,
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.gray100
+  },
+  addActivityInline: {
+    minHeight: 44,
+    borderRadius: radius.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    backgroundColor: colors.primaryLight
+  },
+  addTimelineItem: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'stretch'
+  },
+  addTimelineMarker: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryLight,
+    borderWidth: 2,
+    borderColor: colors.surface
+  },
+  addTimelineCard: {
+    flex: 1,
+    minHeight: 64,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    gap: 2
   },
   stopCard: {
     borderRadius: 20,
