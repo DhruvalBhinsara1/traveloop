@@ -49,6 +49,48 @@ export type Note = {
   tripId: number;
 };
 
+export type BillParticipant = {
+  id: number;
+  name: string;
+  tripId: number;
+  createdAt: string;
+};
+
+export type BillExpense = {
+  id: number;
+  title: string;
+  amount: number;
+  tripId: number;
+  paidById: number;
+  paidBy?: BillParticipant;
+  createdAt: string;
+};
+
+export type BillBalance = {
+  participantId: number;
+  name: string;
+  amount: number;
+};
+
+export type BillSettlement = {
+  fromParticipantId: number;
+  from: string;
+  toParticipantId: number;
+  to: string;
+  amount: number;
+};
+
+export type BillSplit = {
+  participants: BillParticipant[];
+  expenses: BillExpense[];
+  summary: {
+    total: number;
+    perPerson: number;
+    balances: BillBalance[];
+    settlements: BillSettlement[];
+  };
+};
+
 export type Trip = {
   id: number;
   title: string;
@@ -153,4 +195,14 @@ export type CreateNotePayload = {
 
 export type UpdateNotePayload = {
   content: string;
+};
+
+export type CreateBillParticipantPayload = {
+  name: string;
+};
+
+export type CreateBillExpensePayload = {
+  title: string;
+  amount: number;
+  paidById: number;
 };

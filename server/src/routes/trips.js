@@ -78,6 +78,9 @@ tripsRouter.post('/', asyncHandler(async (req, res) => {
           { label: 'Comfortable shoes', category: 'clothing' },
           { label: 'Phone charger', category: 'electronics' }
         ]
+      },
+      billParticipants: {
+        create: [{ name: req.user.name }]
       }
     },
     include: nestedTripInclude

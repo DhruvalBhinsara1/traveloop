@@ -23,6 +23,7 @@ export type RootStackParamList = {
 export type TripDetailTabParamList = {
   Itinerary: undefined;
   Budget: undefined;
+  Split: undefined;
   Checklist: undefined;
   Notes: undefined;
 };

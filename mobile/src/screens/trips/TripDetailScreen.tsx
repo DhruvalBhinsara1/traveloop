@@ -10,11 +10,12 @@ import { PieChart } from 'react-native-gifted-charts';
 import Toast from 'react-native-toast-message';
 
 import { activitiesApi } from '../../api/activities';
+import { billsApi } from '../../api/bills';
 import { checklistApi } from '../../api/checklist';
 import { getErrorMessage } from '../../api/client';
 import { stopsApi } from '../../api/stops';
 import { tripsApi } from '../../api/trips';
-import { Activity, ActivityCategory, ActivityInput, ChecklistItem, Stop, StopInput, Trip } from '../../api/types';
+import { Activity, ActivityCategory, ActivityInput, BillExpense, BillParticipant, BillSplit, ChecklistItem, Stop, StopInput, Trip } from '../../api/types';
 import { Button } from '../../components/Button';
 import { ProgressBar } from '../../components/ProgressBar';
 import { colors, fontFamily, radius, shadows, typography } from '../../theme';
@@ -333,7 +334,9 @@ export function TripDetailScreen({ route, navigation }: Props) {
           tabBarActiveTintColor: colors.primary,
           tabBarInactiveTintColor: colors.gray600,
           tabBarIndicatorStyle: styles.tabIndicator,
+          tabBarItemStyle: styles.tabItem,
           tabBarLabelStyle: styles.tabLabel,
+          tabBarScrollEnabled: true,
           tabBarStyle: styles.tabBar
         }}
       >
@@ -350,6 +353,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
           )}
         </Tab.Screen>
         <Tab.Screen name="Budget">{() => <BudgetTab trip={trip} />}</Tab.Screen>
+        <Tab.Screen name="Split">{() => <SplitTab tripId={trip.id} />}</Tab.Screen>
         <Tab.Screen name="Checklist">
           {() => (
             <ChecklistTab
@@ -666,6 +670,288 @@ function BudgetTab({ trip }: { trip: Trip }) {
   );
 }
 
+function SplitTab({ tripId }: { tripId: number }) {
+  const [split, setSplit] = useState<BillSplit | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [participantName, setParticipantName] = useState('');
+  const [expenseTitle, setExpenseTitle] = useState('');
+  const [expenseAmount, setExpenseAmount] = useState('');
+  const [selectedPayerId, setSelectedPayerId] = useState<number | null>(null);
+
+  const loadSplit = useCallback(async () => {
+    try {
+      const data = await billsApi.get(tripId);
+      setSplit(data);
+      setSelectedPayerId((current) => current ?? data.participants[0]?.id ?? null);
+    } catch (error) {
+      Toast.show({ type: 'error', text1: 'Could not load split', text2: getErrorMessage(error) });
+    } finally {
+      setLoading(false);
+    }
+  }, [tripId]);
+
+  useEffect(() => {
+    loadSplit();
+  }, [loadSplit]);
+
+  useEffect(() => {
+    if (!split?.participants.length) {
+      setSelectedPayerId(null);
+      return;
+    }
+
+    if (!selectedPayerId || !split.participants.some((participant) => participant.id === selectedPayerId)) {
+      setSelectedPayerId(split.participants[0].id);
+    }
+  }, [selectedPayerId, split?.participants]);
+
+  const addParticipant = async () => {
+    const name = participantName.trim();
+    if (!name || saving) return;
+
+    setSaving(true);
+    try {
+      const data = await billsApi.addParticipant(tripId, { name });
+      setSplit(data);
+      setParticipantName('');
+      setSelectedPayerId((current) => current ?? data.participants[0]?.id ?? null);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (error) {
+      Toast.show({ type: 'error', text1: 'Could not add traveler', text2: getErrorMessage(error) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeParticipant = (participant: BillParticipant) => {
+    Alert.alert('Remove traveler?', `${participant.name} and expenses they paid will be removed from this split.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            const data = await billsApi.removeParticipant(participant.id);
+            setSplit(data);
+          } catch (error) {
+            Toast.show({ type: 'error', text1: 'Could not remove traveler', text2: getErrorMessage(error) });
+          }
+        }
+      }
+    ]);
+  };
+
+  const addExpense = async () => {
+    const amount = Number(expenseAmount.replace(/,/g, '').trim());
+    const title = expenseTitle.trim();
+
+    if (!title || !selectedPayerId || !Number.isFinite(amount) || amount <= 0 || saving) return;
+
+    setSaving(true);
+    try {
+      const data = await billsApi.addExpense(tripId, { title, amount, paidById: selectedPayerId });
+      setSplit(data);
+      setExpenseTitle('');
+      setExpenseAmount('');
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch (error) {
+      Toast.show({ type: 'error', text1: 'Could not add expense', text2: getErrorMessage(error) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeExpense = async (expense: BillExpense) => {
+    try {
+      const data = await billsApi.removeExpense(expense.id);
+      setSplit(data);
+    } catch (error) {
+      Toast.show({ type: 'error', text1: 'Could not remove expense', text2: getErrorMessage(error) });
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.splitLoading}>
+        <ActivityIndicator color={colors.primary} />
+      </View>
+    );
+  }
+
+  const participants = split?.participants ?? [];
+  const expenses = split?.expenses ?? [];
+  const summary = split?.summary;
+  const canAddExpense = Boolean(expenseTitle.trim() && Number(expenseAmount.replace(/,/g, '').trim()) > 0 && selectedPayerId);
+
+  return (
+    <ScrollView contentContainerStyle={styles.tabContent}>
+      <View style={styles.splitHeroCard}>
+        <View style={styles.splitHeroTop}>
+          <View>
+            <Text style={styles.meta}>Shared spending</Text>
+            <Text style={styles.splitHeroTotal}>{formatMoney(summary?.total ?? 0)}</Text>
+          </View>
+          <View style={styles.splitIconBadge}>
+            <Ionicons name="receipt-outline" size={22} color={colors.primary} />
+          </View>
+        </View>
+        <View style={styles.splitMetrics}>
+          <SplitMetric label="Travelers" value={String(participants.length)} />
+          <SplitMetric label="Expenses" value={String(expenses.length)} />
+          <SplitMetric label="Each" value={formatMoney(summary?.perPerson ?? 0)} />
+        </View>
+      </View>
+
+      <View style={styles.splitSection}>
+        <View style={styles.splitSectionHeader}>
+          <Text style={styles.stopTitle}>Travelers</Text>
+          <Text style={styles.meta}>Who is splitting costs · tap to remove</Text>
+        </View>
+
+        {participants.length ? (
+          <View style={styles.participantGrid}>
+            {participants.map((participant) => (
+              <Pressable
+                accessibilityRole="button"
+                key={participant.id}
+                onPress={() => removeParticipant(participant)}
+                style={styles.participantChip}
+              >
+                <Text numberOfLines={1} style={styles.participantChipText}>{participant.name}</Text>
+                <Ionicons name="close-circle" size={16} color={colors.gray400} />
+              </Pressable>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.body}>Add the people traveling together before entering expenses.</Text>
+        )}
+
+        <View style={styles.inlineFormRow}>
+          <TextInput
+            value={participantName}
+            onChangeText={setParticipantName}
+            placeholder="Traveler name"
+            placeholderTextColor={colors.gray400}
+            style={[styles.input, styles.inlineInput]}
+          />
+          <Pressable
+            accessibilityRole="button"
+            disabled={!participantName.trim() || saving}
+            onPress={addParticipant}
+            style={[styles.smallPrimaryButton, (!participantName.trim() || saving) && styles.disabled]}
+          >
+            <Ionicons name="add" size={21} color={colors.white} />
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.splitSection}>
+        <View style={styles.splitSectionHeader}>
+          <Text style={styles.stopTitle}>Add Expense</Text>
+          <Text style={styles.meta}>Split equally across all travelers</Text>
+        </View>
+        <TextInput
+          value={expenseTitle}
+          onChangeText={setExpenseTitle}
+          placeholder="Dinner, taxi, hotel..."
+          placeholderTextColor={colors.gray400}
+          style={styles.input}
+        />
+        <TextInput
+          value={expenseAmount}
+          keyboardType="decimal-pad"
+          onChangeText={setExpenseAmount}
+          placeholder="Amount"
+          placeholderTextColor={colors.gray400}
+          style={styles.input}
+        />
+        <View style={styles.payerRow}>
+          {participants.map((participant) => (
+            <Pressable
+              accessibilityRole="button"
+              key={participant.id}
+              onPress={() => setSelectedPayerId(participant.id)}
+              style={[styles.payerPill, selectedPayerId === participant.id && styles.payerPillActive]}
+            >
+              <Text style={[styles.payerPillText, selectedPayerId === participant.id && styles.payerPillTextActive]}>
+                Paid by {participant.name}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        <Button label="Add Expense" icon="add-circle-outline" disabled={!canAddExpense || saving} onPress={addExpense} />
+      </View>
+
+      <View style={styles.splitSection}>
+        <View style={styles.splitSectionHeader}>
+          <Text style={styles.stopTitle}>Settle Up</Text>
+          <Text style={styles.meta}>Suggested payments</Text>
+        </View>
+        {summary?.settlements.length ? (
+          summary.settlements.map((settlement) => <SettlementRow key={`${settlement.fromParticipantId}-${settlement.toParticipantId}`} settlement={settlement} />)
+        ) : (
+          <View style={styles.settledState}>
+            <Ionicons name="checkmark-circle-outline" size={22} color={colors.success} />
+            <Text style={styles.itemTitle}>Everyone is settled</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.splitSection}>
+        <View style={styles.splitSectionHeader}>
+          <Text style={styles.stopTitle}>Expenses</Text>
+          <Text style={styles.meta}>{expenses.length ? 'Shared costs entered for this trip' : 'No expenses yet'}</Text>
+        </View>
+        {expenses.length ? (
+          expenses.map((expense) => <ExpenseRow expense={expense} key={expense.id} onDelete={() => removeExpense(expense)} />)
+        ) : (
+          <EmptyPanel title="No shared costs yet" body="Add the first group expense to see who owes what." compact />
+        )}
+      </View>
+    </ScrollView>
+  );
+}
+
+function SplitMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.splitMetric}>
+      <Text numberOfLines={1} style={styles.splitMetricValue}>{value}</Text>
+      <Text numberOfLines={1} style={styles.splitMetricLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function SettlementRow({ settlement }: { settlement: BillSplit['summary']['settlements'][number] }) {
+  return (
+    <View style={styles.settlementRow}>
+      <View style={styles.settlementIcon}>
+        <Ionicons name="arrow-forward" size={16} color={colors.primary} />
+      </View>
+      <Text numberOfLines={1} style={styles.itemTitle}>{settlement.from} pays {settlement.to}</Text>
+      <Text style={styles.cost}>{formatMoney(settlement.amount)}</Text>
+    </View>
+  );
+}
+
+function ExpenseRow({ expense, onDelete }: { expense: BillExpense; onDelete: () => void }) {
+  return (
+    <View style={styles.expenseRow}>
+      <View style={styles.expenseIcon}>
+        <Ionicons name="receipt-outline" size={18} color={colors.primary} />
+      </View>
+      <View style={styles.grow}>
+        <Text numberOfLines={1} style={styles.itemTitle}>{expense.title}</Text>
+        <Text numberOfLines={1} style={styles.meta}>Paid by {expense.paidBy?.name ?? 'Traveler'}</Text>
+      </View>
+      <Text style={styles.cost}>{formatMoney(expense.amount)}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel={`Delete ${expense.title}`} hitSlop={10} onPress={onDelete}>
+        <Ionicons name="trash-outline" size={18} color={colors.gray400} />
+      </Pressable>
+    </View>
+  );
+}
+
 function ChecklistTab({
   trip,
   onAdd,
@@ -979,6 +1265,9 @@ const styles = StyleSheet.create({
   },
   tabBar: {
     backgroundColor: colors.white
+  },
+  tabItem: {
+    width: 92
   },
   tabIndicator: {
     backgroundColor: colors.primary,
@@ -1385,6 +1674,187 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: colors.white,
     paddingHorizontal: 14
+  },
+  splitLoading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background
+  },
+  splitHeroCard: {
+    borderRadius: radius.card,
+    backgroundColor: colors.charcoal,
+    padding: 16,
+    gap: 16
+  },
+  splitHeroTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12
+  },
+  splitHeroTotal: {
+    color: colors.white,
+    fontFamily: fontFamily.headingExtraBold,
+    fontSize: 34,
+    lineHeight: 40
+  },
+  splitIconBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.frostedWhite
+  },
+  splitMetrics: {
+    flexDirection: 'row',
+    gap: 8
+  },
+  splitMetric: {
+    flex: 1,
+    minHeight: 58,
+    borderRadius: radius.lg,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceOnDark
+  },
+  splitMetricValue: {
+    color: colors.white,
+    fontFamily: fontFamily.headingBold,
+    fontSize: 16,
+    lineHeight: 21
+  },
+  splitMetricLabel: {
+    color: colors.textOnDarkMuted,
+    fontFamily: fontFamily.body,
+    fontSize: 11,
+    lineHeight: 15
+  },
+  splitSection: {
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: 14,
+    gap: 12,
+    ...shadows.subtle
+  },
+  splitSectionHeader: {
+    gap: 2
+  },
+  participantGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8
+  },
+  participantChip: {
+    maxWidth: '100%',
+    minHeight: 36,
+    borderRadius: radius.pill,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    backgroundColor: colors.gray100
+  },
+  participantChipActive: {
+    backgroundColor: colors.primary
+  },
+  participantChipText: {
+    color: colors.gray800,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 13,
+    lineHeight: 17,
+    maxWidth: 180
+  },
+  participantChipTextActive: {
+    color: colors.white
+  },
+  inlineFormRow: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center'
+  },
+  inlineInput: {
+    flex: 1
+  },
+  smallPrimaryButton: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    ...shadows.button
+  },
+  payerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8
+  },
+  payerPill: {
+    minHeight: 34,
+    borderRadius: radius.pill,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.gray100
+  },
+  payerPillActive: {
+    backgroundColor: colors.primaryLight
+  },
+  payerPillText: {
+    color: colors.gray600,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 12,
+    lineHeight: 16
+  },
+  payerPillTextActive: {
+    color: colors.primary
+  },
+  settlementRow: {
+    minHeight: 54,
+    borderRadius: radius.lg,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.primaryLight
+  },
+  settlementIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white
+  },
+  settledState: {
+    minHeight: 54,
+    borderRadius: radius.lg,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.gray50
+  },
+  expenseRow: {
+    minHeight: 60,
+    borderRadius: radius.lg,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.gray50
+  },
+  expenseIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryLight
   },
   legendDot: {
     width: 12,

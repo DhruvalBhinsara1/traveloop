@@ -34,6 +34,8 @@ model Trip {
   stops       Stop[]
   checklist   ChecklistItem[]
   notes       Note[]
+  billParticipants BillParticipant[]
+  billExpenses     BillExpense[]
 
   @@index([userId])
 }
@@ -86,4 +88,29 @@ model Note {
   trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
 
   @@index([tripId])
+}
+
+model BillParticipant {
+  id           Int           @id @default(autoincrement())
+  name         String
+  createdAt    DateTime      @default(now())
+  tripId       Int
+  trip         Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  paidExpenses BillExpense[]
+
+  @@index([tripId])
+}
+
+model BillExpense {
+  id        Int             @id @default(autoincrement())
+  title     String
+  amount    Float
+  createdAt DateTime        @default(now())
+  tripId    Int
+  paidById  Int
+  trip      Trip            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  paidBy    BillParticipant @relation(fields: [paidById], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+  @@index([paidById])
 }

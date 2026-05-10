@@ -62,6 +62,7 @@ server/prisma/           Database schema and migrations
 - Private/public trip controls.
 - Public itinerary sharing through generated share tokens.
 - Trip stops, activities, itinerary timeline, budget, checklist, and notes.
+- Simple bill splitting with travelers, shared expenses, and settle-up suggestions.
 - Dashboard with next trip, timeline preview, planning tools, recent trips, and trip-derived places.
 
 ## First-Time Setup
@@ -256,6 +257,11 @@ POST/PATCH/DELETE  /api/trips/:tripId/stops...
 POST/PATCH/DELETE  /api/stops/:stopId/activities...
 POST/PATCH/DELETE  /api/trips/:tripId/checklist...
 POST/PATCH/DELETE  /api/trips/:tripId/notes...
+GET                /api/trips/:tripId/splits
+POST               /api/trips/:tripId/splits/participants
+DELETE             /api/splits/participants/:id
+POST               /api/trips/:tripId/splits/expenses
+DELETE             /api/splits/expenses/:id
 ```
 
 Check route files in `server/src/routes/` for exact payloads.

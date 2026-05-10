@@ -7,6 +7,7 @@ import morgan from 'morgan';
 import { requireAuth } from './middleware/auth.js';
 import { activitiesRouter } from './routes/activities.js';
 import { authRouter } from './routes/auth.js';
+import { billsRouter } from './routes/bills.js';
 import { checklistRouter } from './routes/checklist.js';
 import { notesRouter } from './routes/notes.js';
 import { publicRouter } from './routes/public.js';
@@ -44,6 +45,7 @@ app.use('/api', requireAuth, stopsRouter);
 app.use('/api', requireAuth, activitiesRouter);
 app.use('/api', requireAuth, checklistRouter);
 app.use('/api', requireAuth, notesRouter);
+app.use('/api', requireAuth, billsRouter);
 
 app.use((_req, _res, next) => {
   next(new HttpError(404, 'Route not found'));

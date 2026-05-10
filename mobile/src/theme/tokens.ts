@@ -41,6 +41,8 @@ export const colors = {
   overlay: palette.overlay,
   frostedWhite: palette.frostedWhite,
   frostedDark: palette.frostedDark,
+  surfaceOnDark: 'rgba(255,255,255,0.1)',
+  textOnDarkMuted: 'rgba(255,255,255,0.68)',
   background: palette.gray50,
   surface: palette.white,
   surfaceAlt: palette.gray100,
