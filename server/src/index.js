@@ -50,6 +50,10 @@ app.use((error, _req, res, _next) => {
   res.status(status).json({ error: message });
 });
 
-app.listen(port, () => {
-  console.log(`Traveloop API listening on ${port}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(port, () => {
+    console.log(`Traveloop API listening on ${port}`);
+  });
+}
+
+export default app;

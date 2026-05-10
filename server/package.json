@@ -8,6 +8,7 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "check": "node --check src/index.js",
+    "vercel-build": "npm run prisma:generate && npm run prisma:deploy",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
     "prisma:deploy": "prisma migrate deploy",
@@ -23,10 +24,8 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "multer": "^2.1.1",
+    "prisma": "^5.22.0",
     "uuid": "^11.0.3"
-  },
-  "devDependencies": {
-    "prisma": "^5.22.0"
   },
   "engines": {
     "node": ">=20"

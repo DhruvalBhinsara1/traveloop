@@ -17,6 +17,7 @@ mobile/web-build/
 # Environment and secrets
 .env
 .env.*
+env
 !.env.example
 mobile/.env
 mobile/.env.*
