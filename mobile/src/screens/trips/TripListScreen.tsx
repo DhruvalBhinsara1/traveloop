@@ -20,6 +20,7 @@ export function TripListScreen({ navigation }: Props) {
   const { trips, refreshing, refresh, createTrip, deleteTrip } = useTrips();
   const [filter, setFilter] = useState<Filter>('All');
   const [createVisible, setCreateVisible] = useState(false);
+  const hasTrips = trips.length > 0;
 
   const visibleTrips = useMemo(() => {
     if (filter === 'Upcoming') return trips.filter((trip) => isUpcoming(trip.startDate));
@@ -45,7 +46,7 @@ export function TripListScreen({ navigation }: Props) {
     <Screen refreshing={refreshing} onRefresh={refresh}>
       <View style={styles.header}>
         <Text style={styles.title}>My Trips</Text>
-        <Button label="New" icon="add" onPress={() => setCreateVisible(true)} style={styles.newButton} />
+        {hasTrips ? <Button label="New" icon="add" onPress={() => setCreateVisible(true)} style={styles.newButton} /> : null}
       </View>
 
       <View style={styles.filters}>
@@ -68,10 +69,10 @@ export function TripListScreen({ navigation }: Props) {
           ))
         ) : (
           <EmptyState
-            title="No trips yet"
-            body="Start planning your first adventure."
-            action="Plan a Trip"
-            onAction={() => setCreateVisible(true)}
+            title={hasTrips ? `No ${filter.toLowerCase()} trips` : 'No trips yet'}
+            body={hasTrips ? 'Try a different filter or plan a new trip.' : 'Start planning your first adventure.'}
+            action={hasTrips ? undefined : 'Plan a Trip'}
+            onAction={hasTrips ? undefined : () => setCreateVisible(true)}
           />
         )}
       </View>

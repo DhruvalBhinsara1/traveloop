@@ -1,6 +1,12 @@
 import { ActivityInput, ChecklistItem, Note, StopInput, Trip, TripInput } from './types';
 import { client } from './client';
 
+type CoverImageUpload = {
+  uri: string;
+  fileName?: string | null;
+  mimeType?: string | null;
+};
+
 export const tripsApi = {
   list: async () => {
     const { data } = await client.get<Trip[]>('/api/trips');
@@ -20,6 +26,22 @@ export const tripsApi = {
   share: async (id: number, isPublic = true) => {
     const { data } = await client.patch<{ id: number; isPublic: boolean; shareToken: string | null }>(`/api/trips/${id}/share`, {
       isPublic
+    });
+    return data;
+  },
+  updateCover: async (id: number, image: CoverImageUpload) => {
+    const formData = new FormData();
+    const extension = image.mimeType?.split('/')[1] ?? 'jpg';
+
+    formData.append('cover', {
+      uri: image.uri,
+      name: image.fileName ?? `trip-${id}-cover.${extension}`,
+      type: image.mimeType ?? 'image/jpeg'
+    } as unknown as Blob);
+
+    const { data } = await client.patch<Trip>(`/api/trips/${id}/cover`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 30000
     });
     return data;
   },

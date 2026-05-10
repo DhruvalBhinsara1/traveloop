@@ -2,7 +2,7 @@ import { ReactNode } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, typography } from '../theme';
+import { colors, layout, typography } from '../theme';
 
 type Props = {
   visible: boolean;
@@ -35,12 +35,12 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(17,24,39,0.42)'
+    backgroundColor: colors.overlay
   },
   sheet: {
     backgroundColor: colors.white,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: layout.bottomSheetRadius,
+    borderTopRightRadius: layout.bottomSheetRadius,
     paddingHorizontal: 20,
     paddingTop: 12,
     gap: 16

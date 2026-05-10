@@ -2,8 +2,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, ImageBackground, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { PieChart } from 'react-native-gifted-charts';
 import Toast from 'react-native-toast-message';
 
@@ -17,7 +19,8 @@ import { Button } from '../../components/Button';
 import { ProgressBar } from '../../components/ProgressBar';
 import { colors, typography } from '../../theme';
 import { calcByCategory, calcStopSubtotal, calcTotal, formatMoney } from '../../utils/budgetCalc';
-import { formatDateRange, nightsBetween } from '../../utils/dateHelpers';
+import { formatDateRange, getTripDays, nightsBetween } from '../../utils/dateHelpers';
+import { getDestinationImage } from '../../utils/photos';
 import { shareTrip } from '../../utils/shareHelpers';
 import { RootStackParamList } from '../../navigation/types';
 import { AddActivitySheet } from './AddActivitySheet';
@@ -42,13 +45,14 @@ const starterChecklist = [
   { label: 'Medication', category: 'health' }
 ];
 
-const chartColors = ['#1B7FF0', '#F59E0B', '#10B981', '#4B5563', '#EF4444', '#9CA3AF'];
+const chartColors = [colors.primary, colors.warning, colors.success, colors.gray600, colors.danger, colors.gray400];
 
 export function TripDetailScreen({ route, navigation }: Props) {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [loading, setLoading] = useState(true);
   const [stopSheetVisible, setStopSheetVisible] = useState(false);
   const [activityStop, setActivityStop] = useState<Stop | null>(null);
+  const [coverUploading, setCoverUploading] = useState(false);
 
   const loadTrip = useCallback(async () => {
     try {
@@ -174,6 +178,42 @@ export function TripDetailScreen({ route, navigation }: Props) {
     }
   };
 
+  const changeCover = async () => {
+    if (!trip || coverUploading) return;
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Toast.show({ type: 'error', text1: 'Photo access needed', text2: 'Allow photo access to update this trip thumbnail.' });
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: true,
+      aspect: [16, 9],
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.86
+    });
+
+    if (result.canceled || !result.assets[0]) return;
+
+    setCoverUploading(true);
+    try {
+      const asset = result.assets[0];
+      const updated = await tripsApi.updateCover(trip.id, {
+        uri: asset.uri,
+        fileName: asset.fileName,
+        mimeType: asset.mimeType
+      });
+      setTrip(sortTrip(updated));
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      Toast.show({ type: 'success', text1: 'Trip thumbnail updated' });
+    } catch (error) {
+      Toast.show({ type: 'error', text1: 'Could not update thumbnail', text2: getErrorMessage(error) });
+    } finally {
+      setCoverUploading(false);
+    }
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.centered}>
@@ -191,19 +231,69 @@ export function TripDetailScreen({ route, navigation }: Props) {
     );
   }
 
+  const sortedStops = [...trip.stops].sort((a, b) => a.order - b.order);
+  const coverImage = trip.coverImage ?? getDestinationImage(sortedStops[0]?.cityName ?? trip.title);
+  const activityCount = trip.stops.reduce((count, stop) => count + stop.activities.length, 0);
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.header}>
-        <Pressable style={styles.iconButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={22} color={colors.charcoal} />
-        </Pressable>
-        <View style={styles.headerCopy}>
-          <Text numberOfLines={1} style={styles.headerTitle}>{trip.title}</Text>
-          <Text style={styles.headerMeta}>{formatDateRange(trip.startDate, trip.endDate)}</Text>
+      <ImageBackground source={{ uri: coverImage }} resizeMode="cover" style={styles.detailHero}>
+        <LinearGradient
+          colors={['rgba(15,23,20,0.18)', 'rgba(15,23,20,0.48)']}
+          pointerEvents="none"
+          style={styles.detailHeroScrim}
+        />
+        <Pressable
+          accessibilityLabel="Change trip thumbnail"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: coverUploading, busy: coverUploading }}
+          disabled={coverUploading}
+          onPress={changeCover}
+          style={styles.heroPressLayer}
+        />
+        <View style={styles.heroActions}>
+          <Pressable accessibilityLabel="Go back" accessibilityRole="button" style={styles.heroIconButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="chevron-back" size={24} color={colors.charcoal} />
+          </Pressable>
+          <View style={styles.heroRightActions}>
+            <Pressable
+              accessibilityLabel="Change trip thumbnail"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: coverUploading, busy: coverUploading }}
+              disabled={coverUploading}
+              style={[styles.heroIconButton, coverUploading && styles.disabled]}
+              onPress={changeCover}
+            >
+              {coverUploading ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="camera-outline" size={21} color={colors.primary} />}
+            </Pressable>
+            <Pressable accessibilityLabel="Share trip" accessibilityRole="button" style={styles.heroIconButton} onPress={share}>
+              <Ionicons name={trip.isPublic ? 'globe-outline' : 'share-social-outline'} size={21} color={colors.charcoal} />
+            </Pressable>
+          </View>
         </View>
-        <Pressable style={styles.iconButton} onPress={share}>
-          <Ionicons name={trip.isPublic ? 'globe-outline' : 'share-social-outline'} size={21} color={colors.primary} />
-        </Pressable>
+      </ImageBackground>
+
+      <View style={styles.detailCard}>
+        <View style={styles.detailTitleRow}>
+          <Text numberOfLines={1} style={styles.detailTitle}>{trip.title}</Text>
+          <Pressable
+            accessibilityLabel="Change trip thumbnail"
+            accessibilityRole="button"
+            accessibilityState={{ disabled: coverUploading, busy: coverUploading }}
+            disabled={coverUploading}
+            hitSlop={10}
+            onPress={changeCover}
+            style={[styles.titleEditButton, coverUploading && styles.disabled]}
+          >
+            <Ionicons name="pencil" size={16} color={colors.primary} />
+          </Pressable>
+        </View>
+        <View style={styles.detailMetaGrid}>
+          <DetailMeta icon="calendar-outline" label={`${formatDateRange(trip.startDate, trip.endDate)} · ${getTripDays(trip.startDate, trip.endDate)} days`} />
+          <DetailMeta icon="map-outline" label={`${trip.stops.length} ${trip.stops.length === 1 ? 'city' : 'cities'}`} />
+          <DetailMeta icon="sparkles-outline" label={`${activityCount} ${activityCount === 1 ? 'activity' : 'activities'}`} />
+          <DetailMeta icon={trip.isPublic ? 'globe-outline' : 'lock-closed-outline'} label={trip.isPublic ? 'Public' : 'Private'} />
+        </View>
       </View>
 
       <Tab.Navigator
@@ -254,6 +344,15 @@ export function TripDetailScreen({ route, navigation }: Props) {
   );
 }
 
+function DetailMeta({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+  return (
+    <View style={styles.detailMetaItem}>
+      <Ionicons name={icon} size={14} color={colors.gray600} />
+      <Text numberOfLines={1} style={styles.detailMetaText}>{label}</Text>
+    </View>
+  );
+}
+
 function ItineraryTab({
   trip,
   onAddStop,
@@ -276,57 +375,67 @@ function ItineraryTab({
       {trip.description ? <Text style={styles.body}>{trip.description}</Text> : null}
 
       {stops.length ? (
-        stops.map((stop, index) => (
-          <View key={stop.id} style={styles.stopCard}>
-            <View style={styles.stopHeader}>
-              <View style={styles.stopTitleWrap}>
-                <Ionicons name="location-outline" size={20} color={colors.primary} />
-                <View style={styles.grow}>
-                  <Text style={styles.stopTitle}>{stop.cityName}, {stop.country}</Text>
-                  <Text style={styles.meta}>
-                    {formatDateRange(stop.arrivalDate, stop.departDate)} - {nightsBetween(stop.arrivalDate, stop.departDate)} nights
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.rowActions}>
-                <MiniButton icon="arrow-up-outline" disabled={index === 0} onPress={() => onMoveStop(stop, -1)} />
-                <MiniButton icon="arrow-down-outline" disabled={index === stops.length - 1} onPress={() => onMoveStop(stop, 1)} />
-                <MiniButton icon="trash-outline" danger onPress={() => onDeleteStop(stop)} />
-              </View>
-            </View>
-
-            <View style={styles.activityList}>
-              {stop.activities.map((activity) => (
-                <View key={activity.id} style={styles.activityRow}>
-                  <View style={styles.activityIcon}>
-                    <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
-                  </View>
+        <>
+          {stops.map((stop, index) => (
+            <View key={stop.id} style={styles.stopCard}>
+              <View style={styles.stopHeader}>
+                <View style={styles.stopTitleWrap}>
+                  <Ionicons name="location-outline" size={20} color={colors.primary} />
                   <View style={styles.grow}>
-                    <Text style={styles.itemTitle}>{activity.name}</Text>
-                    <Text style={styles.meta}>{activity.category}</Text>
+                    <Text style={styles.stopTitle}>{stop.cityName}, {stop.country}</Text>
+                    <Text style={styles.meta}>
+                      {formatDateRange(stop.arrivalDate, stop.departDate)} - {nightsBetween(stop.arrivalDate, stop.departDate)} nights
+                    </Text>
                   </View>
-                  <Text style={styles.cost}>{formatMoney(activity.cost)}</Text>
-                  <Pressable onPress={() => onDeleteActivity(activity)} hitSlop={10}>
-                    <Ionicons name="close-circle" size={20} color={colors.gray400} />
-                  </Pressable>
                 </View>
-              ))}
-            </View>
+                <View style={styles.rowActions}>
+                  <MiniButton icon="arrow-up-outline" disabled={index === 0} onPress={() => onMoveStop(stop, -1)} />
+                  <MiniButton icon="arrow-down-outline" disabled={index === stops.length - 1} onPress={() => onMoveStop(stop, 1)} />
+                  <MiniButton icon="trash-outline" danger onPress={() => onDeleteStop(stop)} />
+                </View>
+              </View>
 
-            <View style={styles.stopFooter}>
-              <Pressable onPress={() => onAddActivity(stop)} style={styles.inlineAdd}>
-                <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
-                <Text style={styles.inlineAddText}>Add Activity</Text>
-              </Pressable>
-              <Text style={styles.meta}>Subtotal: {formatMoney(calcStopSubtotal(stop))}</Text>
+              <View style={styles.activityList}>
+                {stop.activities.map((activity) => (
+                  <View key={activity.id} style={styles.activityRow}>
+                    <View style={styles.activityIcon}>
+                      <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
+                    </View>
+                    <View style={styles.grow}>
+                      <Text style={styles.itemTitle}>{activity.name}</Text>
+                      <Text style={styles.meta}>{activity.category}</Text>
+                    </View>
+                    <Text style={styles.cost}>{formatMoney(activity.cost)}</Text>
+                    <Pressable onPress={() => onDeleteActivity(activity)} hitSlop={10}>
+                      <Ionicons name="close-circle" size={20} color={colors.gray400} />
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+
+              <View style={styles.stopFooter}>
+                <Pressable onPress={() => onAddActivity(stop)} style={styles.inlineAdd}>
+                  <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                  <Text style={styles.inlineAddText}>Add Activity</Text>
+                </Pressable>
+                <Text style={styles.meta}>Subtotal: {formatMoney(calcStopSubtotal(stop))}</Text>
+              </View>
             </View>
-          </View>
-        ))
+          ))}
+          <Pressable onPress={onAddStop} style={({ pressed }) => [styles.addStopRow, pressed && styles.pressedRow]}>
+            <View style={styles.addStopIcon}>
+              <Ionicons name="location-outline" size={18} color={colors.primary} />
+            </View>
+            <View style={styles.grow}>
+              <Text style={styles.itemTitle}>Add another stop</Text>
+              <Text style={styles.meta}>Extend this itinerary with the next city.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.gray400} />
+          </Pressable>
+        </>
       ) : (
-        <EmptyPanel title="No stops yet" body="Add a city stop to start building your timeline." />
+        <EmptyPanel title="No stops yet" body="Add a city stop to start building your timeline." actionLabel="Add Stop" onAction={onAddStop} />
       )}
-
-      <Button label="Add Stop" icon="location-outline" onPress={onAddStop} />
     </ScrollView>
   );
 }
@@ -496,12 +605,27 @@ function MiniButton({
   );
 }
 
-function EmptyPanel({ title, body, compact }: { title: string; body: string; compact?: boolean }) {
+function EmptyPanel({
+  title,
+  body,
+  compact,
+  actionLabel,
+  onAction
+}: {
+  title: string;
+  body: string;
+  compact?: boolean;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
   return (
     <View style={[styles.emptyPanel, compact && styles.compactEmpty]}>
       <Ionicons name="sparkles-outline" size={28} color={colors.primary} />
       <Text style={styles.stopTitle}>{title}</Text>
       <Text style={styles.body}>{body}</Text>
+      {actionLabel && onAction ? (
+        <Button label={actionLabel} icon="location-outline" onPress={onAction} style={styles.emptyAction} />
+      ) : null}
     </View>
   );
 }
@@ -527,6 +651,85 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     padding: 24,
     gap: 16
+  },
+  detailHero: {
+    height: 218,
+    backgroundColor: colors.gray100,
+    position: 'relative'
+  },
+  detailHeroScrim: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0
+  },
+  heroPressLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1
+  },
+  heroActions: {
+    position: 'absolute',
+    top: 14,
+    left: 16,
+    right: 16,
+    zIndex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  heroRightActions: {
+    flexDirection: 'row',
+    gap: 10
+  },
+  heroIconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.frostedWhite
+  },
+  detailCard: {
+    marginTop: -30,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    backgroundColor: colors.white,
+    paddingHorizontal: 20,
+    paddingTop: 22,
+    paddingBottom: 16,
+    gap: 12
+  },
+  detailTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  titleEditButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryLight
+  },
+  detailTitle: {
+    ...typography.h2,
+    flex: 1
+  },
+  detailMetaGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10
+  },
+  detailMetaItem: {
+    minHeight: 26,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    maxWidth: '48%'
+  },
+  detailMetaText: {
+    ...typography.caption,
+    color: colors.gray600,
+    flexShrink: 1
   },
   header: {
     minHeight: 70,
@@ -668,12 +871,45 @@ const styles = StyleSheet.create({
     ...typography.bodyMedium,
     color: colors.primary
   },
+  addStopRow: {
+    minHeight: 68,
+    borderRadius: 20,
+    backgroundColor: colors.white,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: colors.gray100,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1
+  },
+  pressedRow: {
+    opacity: 0.84,
+    transform: [{ scale: 0.99 }]
+  },
+  addStopIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryLight
+  },
   emptyPanel: {
     borderRadius: 20,
     backgroundColor: colors.primaryLight,
     padding: 20,
     gap: 8,
     alignItems: 'center'
+  },
+  emptyAction: {
+    alignSelf: 'stretch',
+    marginTop: 8
   },
   compactEmpty: {
     backgroundColor: colors.gray100

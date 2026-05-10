@@ -35,7 +35,7 @@ export type ScreenProps = Omit<ViewProps, 'children'> & {
 
 export function Screen({
   children,
-  backgroundColor = colors.white,
+  backgroundColor = colors.background,
   centered,
   contentContainerStyle,
   keyboardAvoiding,

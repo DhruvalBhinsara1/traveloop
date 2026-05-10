@@ -27,6 +27,8 @@ npm --prefix server run dev
 npm --prefix mobile run start
 ```
 
+Trip thumbnail uploads use Cloudinary. Add `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` to `server/.env` for cover editing; keep the real values local.
+
 For a phone demo, run Expo with tunnel mode from `mobile/`:
 
 ```bash
@@ -36,6 +38,7 @@ npm --prefix mobile run start:tunnel
 ## Security Notes
 
 - Real `DATABASE_URL`, `JWT_SECRET`, Expo tokens, and GitHub tokens are ignored by Git.
+- Cloud image API keys stay in `server/.env`; the mobile app uploads through the API.
 - Passwords are bcrypt-hashed on the server.
 - The mobile app reads its API endpoint from `EXPO_PUBLIC_API_URL`.
 - Public trip links require a generated share token and only return trips marked public.

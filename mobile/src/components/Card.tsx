@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ImageBackground, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, shadows, typography } from '../theme';
+import { colors, radius, shadows, typography } from '../theme';
 import { formatDateRange } from '../utils/dateHelpers';
 import { Trip } from '../api/types';
 import { IconButton } from './Button';
@@ -40,11 +40,21 @@ export function DestinationCard({ city, country, rating = '5.0', image, height =
   );
 }
 
-export function TripCard({ trip, onPress, onDelete }: { trip: Trip; onPress: () => void; onDelete?: () => void }) {
+export function TripCard({
+  trip,
+  onPress,
+  onDelete,
+  height = 190
+}: {
+  trip: Trip;
+  onPress: () => void;
+  onDelete?: () => void;
+  height?: number;
+}) {
   const cityCount = trip.stops?.length ?? 0;
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.tripCard, pressed && styles.pressed]}>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.tripCard, { height }, pressed && styles.pressed]}>
       <ImageBackground source={{ uri: trip.coverImage ?? getDestinationImage(trip.stops?.[0]?.cityName ?? trip.title) }} style={styles.image}>
         <LinearGradient colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.72)']} style={styles.tripOverlay}>
           <View style={styles.tripHeader}>
@@ -69,9 +79,11 @@ export function TripCard({ trip, onPress, onDelete }: { trip: Trip; onPress: () 
 
 const styles = StyleSheet.create({
   photoCard: {
-    borderRadius: 20,
+    borderRadius: radius.card,
     overflow: 'hidden',
     backgroundColor: colors.gray100,
+    borderWidth: 1,
+    borderColor: colors.border,
     ...shadows.card
   },
   image: {
@@ -126,10 +138,11 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end'
   },
   tripCard: {
-    height: 190,
-    borderRadius: 20,
+    borderRadius: radius.card,
     overflow: 'hidden',
     backgroundColor: colors.gray100,
+    borderWidth: 1,
+    borderColor: colors.border,
     ...shadows.card
   },
   tripOverlay: {

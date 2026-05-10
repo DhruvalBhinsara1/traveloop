@@ -9,7 +9,7 @@ import {
   ViewStyle,
 } from 'react-native';
 
-import { colors, radius, shadows, spacing, typography } from '../theme';
+import { colors, radius, spacing, typography } from '../theme';
 
 export type StatPillTone = 'primary' | 'neutral' | 'success' | 'warning' | 'danger';
 
@@ -105,7 +105,6 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingHorizontal: 14,
     paddingVertical: spacing.sm,
-    ...shadows.subtle,
   },
   pressed: {
     opacity: 0.82,

@@ -1,11 +1,26 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { v4 as uuid } from 'uuid';
 
 import { prisma } from '../prisma.js';
+import { uploadTripCover } from '../utils/cloudStorage.js';
 import { asyncHandler, HttpError, toInt } from '../utils/http.js';
 import { validateTrip } from '../utils/validators.js';
 
 export const tripsRouter = Router();
+
+const coverUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: Number(process.env.MAX_COVER_UPLOAD_BYTES ?? 6_000_000) },
+  fileFilter: (_req, file, callback) => {
+    if (!file.mimetype.startsWith('image/')) {
+      callback(new HttpError(400, 'Trip cover must be an image'));
+      return;
+    }
+
+    callback(null, true);
+  }
+});
 
 const nestedTripInclude = {
   stops: { orderBy: { order: 'asc' }, include: { activities: true } },
@@ -30,7 +45,11 @@ tripsRouter.get('/', asyncHandler(async (req, res) => {
   const trips = await prisma.trip.findMany({
     where: { userId: req.user.id },
     orderBy: { startDate: 'asc' },
-    include: { stops: true, checklist: true, notes: true }
+    include: {
+      stops: { orderBy: { order: 'asc' }, include: { activities: true } },
+      checklist: true,
+      notes: true
+    }
   });
 
   res.json(trips);
@@ -85,6 +104,30 @@ tripsRouter.put('/:id', asyncHandler(async (req, res) => {
       startDate: start,
       endDate: end
     },
+    include: nestedTripInclude
+  });
+
+  res.json(trip);
+}));
+
+tripsRouter.patch('/:id/cover', coverUpload.single('cover'), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  await getOwnedTrip(id, req.user.id);
+
+  if (!req.file) {
+    throw new HttpError(400, 'Cover image file is required');
+  }
+
+  const uploaded = await uploadTripCover({
+    buffer: req.file.buffer,
+    mimetype: req.file.mimetype,
+    tripId: id,
+    userId: req.user.id
+  });
+
+  const trip = await prisma.trip.update({
+    where: { id },
+    data: { coverImage: uploaded.url },
     include: nestedTripInclude
   });
 

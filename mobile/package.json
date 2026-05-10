@@ -24,6 +24,7 @@
     "expo-clipboard": "~6.0.3",
     "expo-font": "~12.0.10",
     "expo-haptics": "~13.0.1",
+    "expo-image-picker": "~15.1.0",
     "expo-linear-gradient": "~13.0.2",
     "expo-sharing": "~12.0.1",
     "react": "18.2.0",

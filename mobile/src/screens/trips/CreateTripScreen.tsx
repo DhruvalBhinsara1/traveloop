@@ -200,7 +200,7 @@ function Field({ label, value, onChangeText, placeholder, error, keyboardType = 
         placeholder={placeholder}
         placeholderTextColor={colors.gray400}
         keyboardType={keyboardType}
-        style={[styles.inputShell, error && styles.inputError]}
+        style={[styles.inputShell, error ? styles.inputError : undefined]}
       />
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </View>
@@ -218,7 +218,7 @@ function DateButton({ label, value, onPress, error }: DateButtonProps) {
   return (
     <View style={styles.dateField}>
       <Text style={styles.label}>{label}</Text>
-      <Pressable onPress={onPress} style={[styles.dateButton, error && styles.inputError]}>
+      <Pressable onPress={onPress} style={[styles.dateButton, error ? styles.inputError : undefined]}>
         <Text style={styles.dateText}>{value}</Text>
         <Ionicons name="calendar-outline" size={18} color={colors.primary} />
       </Pressable>

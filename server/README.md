@@ -28,8 +28,13 @@ Trips:
 - `POST /api/trips`
 - `GET /api/trips/:id`
 - `PUT /api/trips/:id`
+- `PATCH /api/trips/:id/cover` multipart `cover` image upload to cloud storage
 - `DELETE /api/trips/:id`
 - `PATCH /api/trips/:id/share`
+
+## Cloud Image Storage
+
+Trip cover uploads are sent to Cloudinary from the server so API secrets never ship in the mobile app. Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in `server/.env`; leave real values out of Git.
 
 Stops:
 

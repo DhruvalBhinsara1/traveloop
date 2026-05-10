@@ -74,8 +74,8 @@ export function CreateTripSheet({ visible, onClose, onSubmit, onCreated }: Props
     <BottomSheet visible={visible} title="Create New Trip" onClose={onClose}>
       <InputField label="Trip Name *" value={title} onChangeText={setTitle} placeholder="Japan 2026" />
       <View style={styles.row}>
-        <InputField label="Start Date" value={startDate} onChangeText={setStartDate} style={styles.halfInput} />
-        <InputField label="End Date" value={endDate} onChangeText={setEndDate} style={styles.halfInput} />
+        <InputField label="Start Date" value={startDate} onChangeText={setStartDate} containerStyle={styles.dateField} />
+        <InputField label="End Date" value={endDate} onChangeText={setEndDate} containerStyle={styles.dateField} />
       </View>
       <InputField label="Budget" value={budget} onChangeText={setBudget} placeholder="$3000" keyboardType="numeric" />
       <InputField
@@ -94,10 +94,12 @@ export function CreateTripSheet({ visible, onClose, onSubmit, onCreated }: Props
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 12
   },
-  halfInput: {
-    minWidth: 112
+  dateField: {
+    flex: 1,
+    minWidth: 0
   },
   error: {
     ...typography.caption,

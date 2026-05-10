@@ -66,8 +66,8 @@ export function AddStopSheet({
       <InputField label="City Name *" value={cityName} onChangeText={setCityName} placeholder="Tokyo" />
       <InputField label="Country *" value={country} onChangeText={setCountry} placeholder="Japan" />
       <View style={styles.row}>
-        <InputField label="Arrival" value={arrivalDate} onChangeText={setArrivalDate} style={styles.halfInput} />
-        <InputField label="Departure" value={departDate} onChangeText={setDepartDate} style={styles.halfInput} />
+        <InputField label="Arrival" value={arrivalDate} onChangeText={setArrivalDate} containerStyle={styles.dateField} />
+        <InputField label="Departure" value={departDate} onChangeText={setDepartDate} containerStyle={styles.dateField} />
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Button label="Add Stop" icon="location-outline" onPress={submit} loading={submitting} />
@@ -78,10 +78,12 @@ export function AddStopSheet({
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 12
   },
-  halfInput: {
-    minWidth: 112
+  dateField: {
+    flex: 1,
+    minWidth: 0
   },
   error: {
     ...typography.caption,

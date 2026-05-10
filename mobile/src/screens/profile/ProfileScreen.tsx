@@ -13,12 +13,12 @@ import { colors, fonts, radii, spacing } from '../../utils/theme';
 type Props = BottomTabScreenProps<MainTabParamList, 'Profile'>;
 
 export function ProfileScreen(_props: Props) {
-  const { user, logout } = useAuth();
+  const { user, signOut } = useAuth();
   const { stats, loadTrips } = useTrips();
 
   useFocusEffect(
     useCallback(() => {
-      loadTrips(true);
+      loadTrips();
     }, [loadTrips])
   );
 
@@ -33,7 +33,7 @@ export function ProfileScreen(_props: Props) {
   const confirmLogout = () => {
     Alert.alert('Log out?', 'You can log back in anytime.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Log Out', style: 'destructive', onPress: logout }
+      { text: 'Log Out', style: 'destructive', onPress: signOut }
     ]);
   };
 
