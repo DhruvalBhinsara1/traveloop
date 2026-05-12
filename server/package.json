@@ -12,7 +12,10 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
     "prisma:deploy": "prisma migrate deploy",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "db:backup:local": "node scripts/db/sync.js backup-local",
+    "db:backup:hosted": "node scripts/db/sync.js backup-hosted",
+    "db:sync:pull": "node scripts/db/sync.js pull"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

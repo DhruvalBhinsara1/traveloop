@@ -231,6 +231,9 @@ npm --prefix server run check
 npm --prefix server run prisma:generate
 npm --prefix server run prisma:migrate
 npm --prefix server run prisma:deploy
+npm --prefix server run db:backup:local
+npm --prefix server run db:backup:hosted
+npm --prefix server run db:sync:pull
 ```
 
 Mobile:
@@ -371,6 +374,49 @@ prisma migrate deploy
 ```
 
 This generates Prisma Client and applies committed migrations to production.
+
+## Hosted-To-Local Database Sync
+
+Traveloop includes a safe pull-only sync for copying hosted Postgres data into local Postgres.
+
+Set up local sync secrets:
+
+```bash
+cp server/.env.sync.example server/.env.sync
+```
+
+Fill these values locally only:
+
+```env
+LOCAL_DATABASE_URL="postgresql://traveloop:traveloop@localhost:5432/traveloop"
+HOSTED_DATABASE_URL="postgresql://..."
+DB_BACKUP_DIR="backups"
+```
+
+Never commit `server/.env.sync` or files in `server/backups/`.
+
+Create backups:
+
+```bash
+npm --prefix server run db:backup:local
+npm --prefix server run db:backup:hosted
+```
+
+Pull hosted data into local:
+
+```bash
+cd server
+npm run db:sync:pull
+```
+
+The pull command:
+
+- Refuses to run if source and target are the same database.
+- Refuses to restore into a non-local target unless `--allow-non-local-target` is passed.
+- Creates a local backup before replacing local data.
+- Requires typing `PULL_HOSTED_TO_LOCAL`.
+- Uses `pg_dump` and `pg_restore`, so PostgreSQL CLI tools must be installed.
+- Runs `prisma generate` after restore, but does not run migrations.
 
 ## Common Troubleshooting
 
