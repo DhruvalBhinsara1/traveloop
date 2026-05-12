@@ -8,13 +8,22 @@ datasource db {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  name      String
-  email     String   @unique
-  password  String
-  avatarUrl String?
-  createdAt DateTime @default(now())
-  trips     Trip[]
+  id                      Int                 @id @default(autoincrement())
+  name                    String
+  username                String              @unique
+  email                   String              @unique
+  password                String
+  avatarUrl               String?
+  createdAt               DateTime            @default(now())
+  trips                   Trip[]
+  sentFriendRequests      FriendRequest[]     @relation("SentFriendRequests")
+  receivedFriendRequests  FriendRequest[]     @relation("ReceivedFriendRequests")
+  friendshipsAsUserA      Friendship[]        @relation("FriendshipUserA")
+  friendshipsAsUserB      Friendship[]        @relation("FriendshipUserB")
+  ownedGroups             FriendGroup[]
+  groupMemberships        FriendGroupMember[]
+  tripMemberships         TripMember[]
+  billParticipants        BillParticipant[]
 }
 
 model Trip {
@@ -31,12 +40,81 @@ model Trip {
   updatedAt   DateTime  @updatedAt
   userId      Int
   user        User      @relation(fields: [userId], references: [id])
+  groupId     Int?
+  group       FriendGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  members     TripMember[]
   stops       Stop[]
   checklist   ChecklistItem[]
   notes       Note[]
   billParticipants BillParticipant[]
   billExpenses     BillExpense[]
 
+  @@index([userId])
+  @@index([groupId])
+}
+
+model FriendRequest {
+  id          Int       @id @default(autoincrement())
+  requesterId Int
+  recipientId Int
+  status      String    @default("pending")
+  createdAt   DateTime  @default(now())
+  respondedAt DateTime?
+  requester   User      @relation("SentFriendRequests", fields: [requesterId], references: [id], onDelete: Cascade)
+  recipient   User      @relation("ReceivedFriendRequests", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, recipientId])
+  @@index([recipientId, status])
+  @@index([requesterId, status])
+}
+
+model Friendship {
+  id        Int      @id @default(autoincrement())
+  userAId   Int
+  userBId   Int
+  createdAt DateTime @default(now())
+  userA     User     @relation("FriendshipUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB     User     @relation("FriendshipUserB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@unique([userAId, userBId])
+  @@index([userBId])
+}
+
+model FriendGroup {
+  id        Int                 @id @default(autoincrement())
+  name      String
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  ownerId   Int
+  owner     User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  members   FriendGroupMember[]
+  trips     Trip[]
+
+  @@index([ownerId])
+}
+
+model FriendGroupMember {
+  id        Int         @id @default(autoincrement())
+  createdAt DateTime    @default(now())
+  groupId   Int
+  userId    Int
+  group     FriendGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([userId])
+}
+
+model TripMember {
+  id        Int      @id @default(autoincrement())
+  role      String   @default("editor")
+  createdAt DateTime @default(now())
+  tripId    Int
+  userId    Int
+  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId, userId])
   @@index([userId])
 }
 
@@ -95,10 +173,14 @@ model BillParticipant {
   name         String
   createdAt    DateTime      @default(now())
   tripId       Int
+  userId       Int?
   trip         Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
   paidExpenses BillExpense[]
 
   @@index([tripId])
+  @@index([userId])
+  @@unique([tripId, userId])
 }
 
 model BillExpense {

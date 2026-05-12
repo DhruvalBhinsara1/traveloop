@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, layout, typography } from '../theme';
@@ -13,15 +13,22 @@ type Props = {
 
 export function BottomSheet({ visible, title, children, onClose }: Props) {
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
 
   return (
     <Modal animationType="slide" transparent visible={visible} onRequestClose={onClose}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.overlay}>
         <Pressable style={styles.backdrop} onPress={onClose} />
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + 20 }]}>
+        <View style={[styles.sheet, { maxHeight: height * 0.88, paddingBottom: insets.bottom + 20 }]}>
           <View style={styles.handle} />
           <Text style={styles.title}>{title}</Text>
-          {children}
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.sheetContent}
+          >
+            {children}
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -42,8 +49,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: layout.bottomSheetRadius,
     borderTopRightRadius: layout.bottomSheetRadius,
     paddingHorizontal: 20,
-    paddingTop: 12,
-    gap: 16
+    paddingTop: 12
   },
   handle: {
     width: 40,
@@ -55,5 +61,9 @@ const styles = StyleSheet.create({
   },
   title: {
     ...typography.h2
+  },
+  sheetContent: {
+    gap: 16,
+    paddingTop: 16
   }
 });

@@ -2,11 +2,30 @@ import { HttpError, parseDate, requireFields } from './http.js';
 
 export const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-export const validateAuth = ({ name, email, password }, mode = 'register') => {
-  requireFields({ email, password, ...(mode === 'register' ? { name } : {}) }, mode === 'register' ? ['name', 'email', 'password'] : ['email', 'password']);
+export const normalizeUsername = (username) => String(username ?? '').trim().toLowerCase();
+
+export const validateUsername = (username) => {
+  const normalized = normalizeUsername(username);
+
+  if (!/^[a-z0-9_]{3,24}$/.test(normalized)) {
+    throw new HttpError(400, 'Username must be 3-24 characters using letters, numbers, or underscores');
+  }
+
+  return normalized;
+};
+
+export const validateAuth = ({ name, username, email, password }, mode = 'register') => {
+  requireFields(
+    { email, password, ...(mode === 'register' ? { name, username } : {}) },
+    mode === 'register' ? ['name', 'username', 'email', 'password'] : ['email', 'password']
+  );
 
   if (!validateEmail(email)) {
     throw new HttpError(400, 'Email must be valid');
+  }
+
+  if (mode === 'register') {
+    validateUsername(username);
   }
 
   if (String(password).length < 8) {

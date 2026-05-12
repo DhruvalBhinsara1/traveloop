@@ -1,8 +1,10 @@
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { Trip, TripInput } from '../../api/types';
+import { socialApi } from '../../api/social';
+import { FriendGroup, PublicUser, Trip, TripInput } from '../../api/types';
 import { BottomSheet } from '../../components/BottomSheet';
 import { Button } from '../../components/Button';
 import { InputField } from '../../components/InputField';
@@ -25,8 +27,46 @@ export function CreateTripSheet({ visible, onClose, onSubmit, onCreated }: Props
   const [budget, setBudget] = useState('');
   const [description, setDescription] = useState('');
   const [isPublic, setIsPublic] = useState(false);
+  const [friends, setFriends] = useState<PublicUser[]>([]);
+  const [groups, setGroups] = useState<FriendGroup[]>([]);
+  const [selectedFriendIds, setSelectedFriendIds] = useState<number[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    let mounted = true;
+    Promise.all([socialApi.friends(), socialApi.groups()])
+      .then(([nextFriends, nextGroups]) => {
+        if (!mounted) return;
+        setFriends(nextFriends);
+        setGroups(nextGroups);
+      })
+      .catch(() => {
+        if (mounted) {
+          setFriends([]);
+          setGroups([]);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [visible]);
+
+  const toggleFriend = (friendId: number) => {
+    setSelectedGroupId(null);
+    setSelectedFriendIds((current) =>
+      current.includes(friendId) ? current.filter((id) => id !== friendId) : [...current, friendId]
+    );
+  };
+
+  const toggleGroup = (groupId: number) => {
+    setSelectedFriendIds([]);
+    setSelectedGroupId((current) => (current === groupId ? null : groupId));
+  };
 
   const submit = async () => {
     const validation = requireText(title, 'Trip name is required') ?? validateTripDates(startDate, endDate);
@@ -56,13 +96,17 @@ export function CreateTripSheet({ visible, onClose, onSubmit, onCreated }: Props
         endDate,
         budget: parsedBudget,
         coverImage: getDestinationImage(title),
-        isPublic
+        isPublic,
+        memberIds: selectedGroupId ? [] : selectedFriendIds,
+        groupId: selectedGroupId
       });
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setTitle('');
       setBudget('');
       setDescription('');
       setIsPublic(false);
+      setSelectedFriendIds([]);
+      setSelectedGroupId(null);
       setError(null);
       onCreated?.(trip);
       onClose();
@@ -95,6 +139,38 @@ export function CreateTripSheet({ visible, onClose, onSubmit, onCreated }: Props
           <VisibilityOption label="Public" active={isPublic} onPress={() => setIsPublic(true)} />
         </View>
       </View>
+      <View style={styles.travelersField}>
+        <Text style={styles.privacyLabel}>Travelers</Text>
+        <Text style={styles.travelersHint}>Invite friends now, or attach one of your groups.</Text>
+        {groups.length ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+            {groups.map((group) => (
+              <TravelOption
+                key={group.id}
+                icon="people-outline"
+                label={group.name}
+                selected={selectedGroupId === group.id}
+                onPress={() => toggleGroup(group.id)}
+              />
+            ))}
+          </ScrollView>
+        ) : null}
+        {friends.length ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+            {friends.map((friend) => (
+              <TravelOption
+                key={friend.id}
+                icon="person-outline"
+                label={friend.name}
+                selected={selectedFriendIds.includes(friend.id)}
+                onPress={() => toggleFriend(friend.id)}
+              />
+            ))}
+          </ScrollView>
+        ) : (
+          <Text style={styles.travelersEmpty}>Add friends from the People tab to invite them into trips.</Text>
+        )}
+      </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Button label="Create Trip" icon="add-circle-outline" onPress={submit} loading={submitting} />
     </BottomSheet>
@@ -105,6 +181,30 @@ function VisibilityOption({ label, active, onPress }: { label: string; active: b
   return (
     <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} onPress={onPress} style={[styles.privacyOption, active && styles.privacyOptionActive]}>
       <Text style={[styles.privacyOptionText, active && styles.privacyOptionTextActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function TravelOption({
+  icon,
+  label,
+  selected,
+  onPress
+}: {
+  icon: 'people-outline' | 'person-outline';
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={[styles.travelOption, selected && styles.travelOptionActive]}
+    >
+      <Ionicons name={icon} size={15} color={selected ? colors.primary : colors.gray600} />
+      <Text numberOfLines={1} style={[styles.travelOptionText, selected && styles.travelOptionTextActive]}>{label}</Text>
     </Pressable>
   );
 }
@@ -156,5 +256,45 @@ const styles = StyleSheet.create({
   },
   privacyOptionTextActive: {
     color: colors.white
+  },
+  travelersField: {
+    gap: 8
+  },
+  travelersHint: {
+    ...typography.caption,
+    color: colors.gray600,
+    marginTop: -2
+  },
+  chipRow: {
+    gap: 8,
+    paddingRight: 20
+  },
+  travelOption: {
+    maxWidth: 170,
+    minHeight: 38,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.gray50
+  },
+  travelOptionActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight
+  },
+  travelOptionText: {
+    ...typography.caption,
+    color: colors.gray600,
+    maxWidth: 130
+  },
+  travelOptionTextActive: {
+    color: colors.primary
+  },
+  travelersEmpty: {
+    ...typography.caption,
+    color: colors.textMuted
   }
 });

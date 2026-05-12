@@ -11,6 +11,7 @@ import { billsRouter } from './routes/bills.js';
 import { checklistRouter } from './routes/checklist.js';
 import { notesRouter } from './routes/notes.js';
 import { publicRouter } from './routes/public.js';
+import { friendsRouter, groupsRouter, usersRouter } from './routes/social.js';
 import { stopsRouter } from './routes/stops.js';
 import { tripsRouter } from './routes/trips.js';
 import { HttpError } from './utils/http.js';
@@ -40,6 +41,9 @@ app.get('/health', (_req, res) => {
 
 app.use('/api/auth', authRouter);
 app.use('/api/public', publicRouter);
+app.use('/api/users', requireAuth, usersRouter);
+app.use('/api/friends', requireAuth, friendsRouter);
+app.use('/api/groups', requireAuth, groupsRouter);
 app.use('/api/trips', requireAuth, tripsRouter);
 app.use('/api', requireAuth, stopsRouter);
 app.use('/api', requireAuth, activitiesRouter);

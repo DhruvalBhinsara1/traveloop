@@ -1,4 +1,4 @@
-import { AuthResponse, User } from './types';
+import { AuthResponse, RegisterPayload, User } from './types';
 import { client } from './client';
 
 type AvatarUpload = {
@@ -7,8 +7,13 @@ type AvatarUpload = {
   mimeType?: string | null;
 };
 
+type ProfileUpdatePayload = {
+  name: string;
+  username: string;
+};
+
 export const authApi = {
-  register: async (payload: { name: string; email: string; password: string }) => {
+  register: async (payload: RegisterPayload) => {
     const { data } = await client.post<AuthResponse>('/api/auth/register', payload);
     return data;
   },
@@ -18,6 +23,10 @@ export const authApi = {
   },
   me: async () => {
     const { data } = await client.get<{ user: User }>('/api/auth/me');
+    return data.user;
+  },
+  updateProfile: async (payload: ProfileUpdatePayload) => {
+    const { data } = await client.patch<{ user: User }>('/api/auth/me', payload);
     return data.user;
   },
   updateAvatar: async (image: AvatarUpload) => {

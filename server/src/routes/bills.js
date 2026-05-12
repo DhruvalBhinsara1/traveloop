@@ -1,13 +1,13 @@
 import { Router } from 'express';
 
 import { prisma } from '../prisma.js';
-import { asyncHandler, HttpError, toInt } from '../utils/http.js';
-import { getOwnedTrip } from './trips.js';
+import { asyncHandler, HttpError, publicUserSelect, toInt } from '../utils/http.js';
+import { getAccessibleTrip } from './trips.js';
 
 export const billsRouter = Router();
 
 const splitInclude = {
-  billParticipants: { orderBy: { createdAt: 'asc' } },
+  billParticipants: { orderBy: { createdAt: 'asc' }, include: { user: { select: publicUserSelect } } },
   billExpenses: {
     orderBy: { createdAt: 'desc' },
     include: { paidBy: true }
@@ -97,9 +97,35 @@ const serializeSplit = (trip) => {
   };
 };
 
+const ensureTripBillParticipants = async (trip) => {
+  const userEntries = new Map();
+  userEntries.set(trip.user.id, trip.user);
+  trip.members?.forEach((member) => userEntries.set(member.userId, member.user));
+  trip.group?.members?.forEach((member) => userEntries.set(member.userId, member.user));
+
+  await Promise.all(
+    [...userEntries.values()].map((user) =>
+      prisma.billParticipant.upsert({
+        where: { tripId_userId: { tripId: trip.id, userId: user.id } },
+        create: { tripId: trip.id, userId: user.id, name: user.name },
+        update: { name: user.name }
+      })
+    )
+  );
+};
+
 const getOwnedParticipant = async (id, userId) => {
   const participant = await prisma.billParticipant.findFirst({
-    where: { id, trip: { userId } }
+    where: {
+      id,
+      trip: {
+        OR: [
+          { userId },
+          { members: { some: { userId } } },
+          { group: { members: { some: { userId } } } }
+        ]
+      }
+    }
   });
 
   if (!participant) {
@@ -111,7 +137,16 @@ const getOwnedParticipant = async (id, userId) => {
 
 const getOwnedExpense = async (id, userId) => {
   const expense = await prisma.billExpense.findFirst({
-    where: { id, trip: { userId } }
+    where: {
+      id,
+      trip: {
+        OR: [
+          { userId },
+          { members: { some: { userId } } },
+          { group: { members: { some: { userId } } } }
+        ]
+      }
+    }
   });
 
   if (!expense) {
@@ -122,7 +157,18 @@ const getOwnedExpense = async (id, userId) => {
 };
 
 const getOwnedSplit = async (tripId, userId) => {
-  await getOwnedTrip(tripId, userId);
+  await getAccessibleTrip(tripId, userId);
+  const trip = await prisma.trip.findUnique({
+    where: { id: tripId },
+    include: splitInclude
+  });
+
+  return serializeSplit(trip);
+};
+
+const getAccessibleSplit = async (tripId, userId) => {
+  const accessibleTrip = await getAccessibleTrip(tripId, userId);
+  await ensureTripBillParticipants(accessibleTrip);
   const trip = await prisma.trip.findUnique({
     where: { id: tripId },
     include: splitInclude
@@ -132,11 +178,11 @@ const getOwnedSplit = async (tripId, userId) => {
 };
 
 billsRouter.get('/trips/:tripId/splits', asyncHandler(async (req, res) => {
-  res.json(await getOwnedSplit(toInt(req.params.tripId, 'tripId'), req.user.id));
+  res.json(await getAccessibleSplit(toInt(req.params.tripId, 'tripId'), req.user.id));
 }));
 
 billsRouter.post('/trips/:tripId/splits/participants', asyncHandler(async (req, res) => {
-  const trip = await getOwnedTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
+  const trip = await getAccessibleTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
   const name = String(req.body.name ?? '').trim();
 
   if (!name) {
@@ -159,12 +205,15 @@ billsRouter.post('/trips/:tripId/splits/participants', asyncHandler(async (req, 
 
 billsRouter.delete('/splits/participants/:id', asyncHandler(async (req, res) => {
   const participant = await getOwnedParticipant(toInt(req.params.id), req.user.id);
+  if (participant.userId) {
+    throw new HttpError(400, 'Trip members cannot be removed from split participants');
+  }
   await prisma.billParticipant.delete({ where: { id: participant.id } });
   res.json(await getOwnedSplit(participant.tripId, req.user.id));
 }));
 
 billsRouter.post('/trips/:tripId/splits/expenses', asyncHandler(async (req, res) => {
-  const trip = await getOwnedTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
+  const trip = await getAccessibleTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
   const title = String(req.body.title ?? '').trim();
   const amount = Number(req.body.amount);
   const paidById = toInt(req.body.paidById, 'paidById');

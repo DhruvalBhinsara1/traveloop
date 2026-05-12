@@ -15,8 +15,9 @@ type AuthContextValue = {
   user: User | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (name: string, email: string, password: string) => Promise<void>;
+  signUp: (name: string, username: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  updateProfile: (payload: { name: string; username: string }) => Promise<User>;
   updateAvatar: (image: AvatarUpload) => Promise<User>;
 };
 
@@ -58,14 +59,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await AsyncStorage.setItem(AUTH_TOKEN_KEY, response.token);
         setUser(response.user);
       },
-      signUp: async (name, email, password) => {
-        const response = await authApi.register({ name, email, password });
+      signUp: async (name, username, email, password) => {
+        const response = await authApi.register({ name, username, email, password });
         await AsyncStorage.setItem(AUTH_TOKEN_KEY, response.token);
         setUser(response.user);
       },
       signOut: async () => {
         await AsyncStorage.multiRemove([AUTH_TOKEN_KEY, LEGACY_AUTH_TOKEN_KEY]);
         setUser(null);
+      },
+      updateProfile: async (payload) => {
+        const profile = await authApi.updateProfile(payload);
+        setUser(profile);
+        return profile;
       },
       updateAvatar: async (image) => {
         const profile = await authApi.updateAvatar(image);

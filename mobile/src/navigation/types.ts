@@ -6,6 +6,7 @@ export type AuthStackParamList = {
 export type MainTabsParamList = {
   Home: undefined;
   Trips: undefined;
+  People: undefined;
   Profile: undefined;
 };
 
@@ -24,6 +25,7 @@ export type TripDetailTabParamList = {
   Itinerary: undefined;
   Budget: undefined;
   Split: undefined;
+  Crew: undefined;
   Checklist: undefined;
   Notes: undefined;
 };

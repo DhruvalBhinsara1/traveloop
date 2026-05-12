@@ -47,8 +47,8 @@ server/prisma/           Database schema and migrations
 
 ## Tech Stack
 
-- Mobile: Expo SDK 51, React Native, TypeScript, React Navigation.
-- API: Node 20+, Express, Prisma, JWT auth, bcrypt.
+- Mobile: Expo SDK 54, React Native 0.81, React 19, TypeScript, React Navigation.
+- API: Node 20+ with Node 22 LTS recommended, Express, Prisma, JWT auth, bcrypt.
 - Database: Postgres.
 - Images: Cloudinary through the server only.
 - Deployment: Vercel for the API, Neon/Postgres-compatible database.
@@ -56,16 +56,25 @@ server/prisma/           Database schema and migrations
 ## What The App Supports
 
 - Email/password signup and login.
-- Optional profile photo upload during signup.
-- Editable profile photo.
+- Optional profile photo upload during signup from camera or photo library.
+- Editable profile photo from camera or photo library.
 - Trip creation with title, dates, budget, description, cover photo, and privacy.
 - Private/public trip controls.
 - Public itinerary sharing through generated share tokens.
 - Trip stops, activities, itinerary timeline, budget, checklist, and notes.
 - Simple bill splitting with travelers, shared expenses, and settle-up suggestions.
+- Usernames, friend requests, friends, and private friend groups.
+- Shared trips with direct friend collaborators or group-based access.
+- Crew management on Trip Detail, with owners controlling membership and sharing.
 - Dashboard with next trip, timeline preview, planning tools, recent trips, and trip-derived places.
 
 ## First-Time Setup
+
+Use Node 22 LTS for local development:
+
+```bash
+nvm use
+```
 
 Install dependencies from the repo root:
 
@@ -230,6 +239,8 @@ Mobile:
 npm --prefix mobile run start
 npm --prefix mobile run start:tunnel
 npm --prefix mobile run check
+cd mobile && npx expo-doctor
+cd mobile && npx expo install --check
 ```
 
 ## API Overview
@@ -244,6 +255,8 @@ POST /api/auth/login
 GET  /api/public/trips/:shareToken
 ```
 
+Registration requires `name`, `username`, `email`, and `password`. Usernames are normalized lowercase and can contain letters, numbers, and underscores.
+
 Authenticated routes require a JWT:
 
 ```txt
@@ -253,6 +266,18 @@ GET/POST           /api/trips
 GET/PATCH/DELETE   /api/trips/:id
 PATCH              /api/trips/:id/cover
 PATCH              /api/trips/:id/share
+POST               /api/trips/:id/members
+DELETE             /api/trips/:id/members/:userId
+GET                /api/users/search?username=...
+GET                /api/friends
+GET                /api/friends/requests
+POST               /api/friends/requests
+PATCH              /api/friends/requests/:id
+DELETE             /api/friends/:userId
+GET/POST           /api/groups
+GET/PATCH/DELETE   /api/groups/:id
+POST               /api/groups/:id/members
+DELETE             /api/groups/:id/members/:userId
 POST/PATCH/DELETE  /api/trips/:tripId/stops...
 POST/PATCH/DELETE  /api/stops/:stopId/activities...
 POST/PATCH/DELETE  /api/trips/:tripId/checklist...
@@ -296,6 +321,8 @@ When improving screens:
 
 ```bash
 npm run check
+cd mobile && npx expo-doctor
+cd mobile && npx expo install --check
 git diff --check
 ```
 
@@ -369,6 +396,7 @@ Photo uploads fail:
 
 - Confirm Cloudinary env vars exist on the server/Vercel project.
 - Confirm upload size is within the configured limits.
+- Confirm camera or photo library permissions were granted on the device.
 - Do not put Cloudinary secrets in `mobile/.env`.
 
 Expo tunnel asks for `@expo/ngrok`:

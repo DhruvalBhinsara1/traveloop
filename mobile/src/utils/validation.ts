@@ -9,6 +9,10 @@ import type {
 
 export const validateEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
+export const normalizeUsername = (username: string) => username.trim().toLowerCase();
+
+export const validateUsername = (username: string) => /^[a-z0-9_]{3,24}$/.test(normalizeUsername(username));
+
 export const requireText = (value: string, message: string) => {
   if (!value.trim()) {
     return message;
@@ -47,6 +51,7 @@ export const validateLogin = (payload: LoginPayload) => {
 export const validateRegister = (payload: RegisterPayload) => {
   const errors: ValidationErrors<keyof RegisterPayload> = {};
   if (!payload.name.trim()) errors.name = 'Name is required.';
+  if (!validateUsername(payload.username)) errors.username = 'Use 3-24 letters, numbers, or underscores.';
   if (!validateEmail(payload.email.trim())) errors.email = 'Enter a valid email address.';
   if (payload.password.length < 8) errors.password = 'Password must be at least 8 characters.';
   return errors;

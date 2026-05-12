@@ -9,7 +9,7 @@ publicRouter.get('/:shareToken', asyncHandler(async (req, res) => {
   const trip = await prisma.trip.findFirst({
     where: { shareToken: req.params.shareToken, isPublic: true },
     include: {
-      user: { select: { name: true, avatarUrl: true } },
+      user: { select: { name: true, username: true, avatarUrl: true } },
       stops: { orderBy: { order: 'asc' }, include: { activities: true } },
       checklist: true,
       notes: { orderBy: { updatedAt: 'desc' } }

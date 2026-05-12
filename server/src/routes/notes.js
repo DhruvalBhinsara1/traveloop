@@ -2,12 +2,23 @@ import { Router } from 'express';
 
 import { prisma } from '../prisma.js';
 import { asyncHandler, HttpError, requireFields, toInt } from '../utils/http.js';
-import { getOwnedTrip } from './trips.js';
+import { getAccessibleTrip } from './trips.js';
 
 export const notesRouter = Router();
 
 const getOwnedNote = async (id, userId) => {
-  const note = await prisma.note.findFirst({ where: { id, trip: { userId } } });
+  const note = await prisma.note.findFirst({
+    where: {
+      id,
+      trip: {
+        OR: [
+          { userId },
+          { members: { some: { userId } } },
+          { group: { members: { some: { userId } } } }
+        ]
+      }
+    }
+  });
   if (!note) {
     throw new HttpError(404, 'Note not found');
   }
@@ -15,12 +26,12 @@ const getOwnedNote = async (id, userId) => {
 };
 
 notesRouter.get('/trips/:tripId/notes', asyncHandler(async (req, res) => {
-  const trip = await getOwnedTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
+  const trip = await getAccessibleTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
   res.json(trip.notes);
 }));
 
 notesRouter.post('/trips/:tripId/notes', asyncHandler(async (req, res) => {
-  const trip = await getOwnedTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
+  const trip = await getAccessibleTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
   requireFields(req.body, ['content']);
 
   const note = await prisma.note.create({

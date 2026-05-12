@@ -2,7 +2,7 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -18,7 +18,9 @@ import {
 import Toast from 'react-native-toast-message';
 
 import { getApiErrorMessage } from '../../api/client';
+import { socialApi } from '../../api/social';
 import { tripsApi } from '../../api/trips';
+import { FriendGroup, PublicUser } from '../../api/types';
 import type { RootStackParamList } from '../../navigation/types';
 import { formatDate, toIsoDate } from '../../utils/dateHelpers';
 import { colors, fonts, radii, spacing } from '../../utils/theme';
@@ -43,9 +45,45 @@ export function CreateTripScreen({ navigation }: Props) {
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(defaultEnd);
   const [isPublic, setIsPublic] = useState(false);
+  const [friends, setFriends] = useState<PublicUser[]>([]);
+  const [groups, setGroups] = useState<FriendGroup[]>([]);
+  const [selectedFriendIds, setSelectedFriendIds] = useState<number[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [pickerField, setPickerField] = useState<DateField | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<ValidationErrors<'title' | 'startDate' | 'endDate' | 'budget'>>({});
+
+  useEffect(() => {
+    let mounted = true;
+    Promise.all([socialApi.friends(), socialApi.groups()])
+      .then(([nextFriends, nextGroups]) => {
+        if (!mounted) return;
+        setFriends(nextFriends);
+        setGroups(nextGroups);
+      })
+      .catch(() => {
+        if (mounted) {
+          setFriends([]);
+          setGroups([]);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const toggleFriend = (friendId: number) => {
+    setSelectedGroupId(null);
+    setSelectedFriendIds((current) =>
+      current.includes(friendId) ? current.filter((id) => id !== friendId) : [...current, friendId]
+    );
+  };
+
+  const toggleGroup = (groupId: number) => {
+    setSelectedFriendIds([]);
+    setSelectedGroupId((current) => (current === groupId ? null : groupId));
+  };
 
   const submit = async () => {
     const parsedBudget = parseOptionalMoney(budget);
@@ -55,7 +93,9 @@ export function CreateTripScreen({ navigation }: Props) {
       startDate: toIsoDate(startDate),
       endDate: toIsoDate(endDate),
       budget: parsedBudget,
-      isPublic
+      isPublic,
+      memberIds: selectedGroupId ? [] : selectedFriendIds,
+      groupId: selectedGroupId
     };
     const nextErrors = validateTrip(payload);
     setErrors(nextErrors);
@@ -171,6 +211,39 @@ export function CreateTripScreen({ navigation }: Props) {
             </View>
           </View>
 
+          <View style={styles.field}>
+            <Text style={styles.label}>Travelers</Text>
+            <Text style={styles.helperText}>Invite friends or attach a group.</Text>
+            {groups.length ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                {groups.map((group) => (
+                  <TravelerChip
+                    key={group.id}
+                    label={group.name}
+                    icon="people-outline"
+                    active={selectedGroupId === group.id}
+                    onPress={() => toggleGroup(group.id)}
+                  />
+                ))}
+              </ScrollView>
+            ) : null}
+            {friends.length ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                {friends.map((friend) => (
+                  <TravelerChip
+                    key={friend.id}
+                    label={friend.name}
+                    icon="person-outline"
+                    active={selectedFriendIds.includes(friend.id)}
+                    onPress={() => toggleFriend(friend.id)}
+                  />
+                ))}
+              </ScrollView>
+            ) : (
+              <Text style={styles.helperText}>Add friends from People before inviting them into a trip.</Text>
+            )}
+          </View>
+
           <Pressable
             onPress={submit}
             disabled={isSubmitting}
@@ -242,6 +315,25 @@ function DateButton({ label, value, onPress, error }: DateButtonProps) {
       </Pressable>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </View>
+  );
+}
+
+function TravelerChip({
+  label,
+  icon,
+  active,
+  onPress
+}: {
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={[styles.travelerChip, active && styles.travelerChipActive]}>
+      <Ionicons name={icon} size={15} color={active ? colors.primary : colors.gray600} />
+      <Text numberOfLines={1} style={[styles.travelerChipText, active && styles.travelerChipTextActive]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -349,6 +441,40 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 12,
     color: colors.danger
+  },
+  helperText: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.gray500
+  },
+  chipRow: {
+    gap: spacing.sm,
+    paddingRight: spacing.lg
+  },
+  travelerChip: {
+    maxWidth: 180,
+    minHeight: 38,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+    backgroundColor: colors.gray50,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs
+  },
+  travelerChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight
+  },
+  travelerChipText: {
+    fontFamily: fonts.bodyMedium,
+    color: colors.gray600,
+    fontSize: 12,
+    maxWidth: 132
+  },
+  travelerChipTextActive: {
+    color: colors.primary
   },
   primaryButton: {
     minHeight: 58,

@@ -1,24 +1,34 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { useFocusEffect } from '@react-navigation/native';
-import * as ImagePicker from 'expo-image-picker';
+import * as Clipboard from 'expo-clipboard';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import Toast from 'react-native-toast-message';
 
 import { getErrorMessage } from '../../api/client';
+import { BottomSheet } from '../../components/BottomSheet';
+import { Button } from '../../components/Button';
+import { InputField } from '../../components/InputField';
 import { Screen } from '../../components/Screen';
 import { useAuth } from '../../context/AuthContext';
 import { useTrips } from '../../hooks/useTrips';
 import type { MainTabParamList } from '../../navigation/types';
 import { colors, fontFamily, radius, shadows, spacing, typography } from '../../theme';
+import { pickImageFromDevice } from '../../utils/mediaPicker';
+import { normalizeUsername, validateUsername } from '../../utils/validation';
 
 type Props = BottomTabScreenProps<MainTabParamList, 'Profile'>;
 
 export function ProfileScreen(_props: Props) {
-  const { user, signOut, updateAvatar } = useAuth();
+  const { user, signOut, updateAvatar, updateProfile } = useAuth();
   const { stats, loadTrips } = useTrips();
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [editVisible, setEditVisible] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [usernameDraft, setUsernameDraft] = useState('');
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -40,29 +50,26 @@ export function ProfileScreen(_props: Props) {
   const changeAvatar = async () => {
     if (avatarUploading) return;
 
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Toast.show({ type: 'error', text1: 'Photo access needed', text2: 'Allow photo access to update your profile photo.' });
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsEditing: true,
+    const result = await pickImageFromDevice({
+      title: 'Update Profile Photo',
       aspect: [1, 1],
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.82
     });
 
-    if (result.canceled || !result.assets[0]) return;
+    if (result.status === 'permission-denied') {
+      Toast.show({
+        type: 'error',
+        text1: result.source === 'camera' ? 'Camera access needed' : 'Photo access needed',
+        text2: result.source === 'camera' ? 'Allow camera access to take a profile photo.' : 'Allow photo access to update your profile photo.'
+      });
+      return;
+    }
+
+    if (result.status !== 'selected') return;
 
     setAvatarUploading(true);
     try {
-      const asset = result.assets[0];
-      await updateAvatar({
-        uri: asset.uri,
-        fileName: asset.fileName,
-        mimeType: asset.mimeType
-      });
+      await updateAvatar(result.image);
       Toast.show({ type: 'success', text1: 'Profile photo updated' });
     } catch (error) {
       Toast.show({ type: 'error', text1: 'Could not update photo', text2: getErrorMessage(error) });
@@ -76,6 +83,50 @@ export function ProfileScreen(_props: Props) {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Log Out', style: 'destructive', onPress: signOut }
     ]);
+  };
+
+  const copyUsername = async () => {
+    if (!user?.username) return;
+    await Clipboard.setStringAsync(user.username);
+    Toast.show({ type: 'success', text1: 'Username copied' });
+  };
+
+  const openEditProfile = () => {
+    setNameDraft(user?.name ?? '');
+    setUsernameDraft(user?.username ?? '');
+    setProfileError(null);
+    setEditVisible(true);
+  };
+
+  const saveProfile = async () => {
+    const nextName = nameDraft.trim();
+    const nextUsername = normalizeUsername(usernameDraft);
+
+    if (!nextName) {
+      setProfileError('Name is required');
+      return;
+    }
+
+    if (nextName.length > 60) {
+      setProfileError('Name must be 60 characters or fewer');
+      return;
+    }
+
+    if (!validateUsername(nextUsername)) {
+      setProfileError('Username must be 3-24 letters, numbers, or underscores');
+      return;
+    }
+
+    setProfileSaving(true);
+    try {
+      await updateProfile({ name: nextName, username: nextUsername });
+      setEditVisible(false);
+      Toast.show({ type: 'success', text1: 'Profile updated' });
+    } catch (error) {
+      setProfileError(getErrorMessage(error));
+    } finally {
+      setProfileSaving(false);
+    }
   };
 
   return (
@@ -112,6 +163,7 @@ export function ProfileScreen(_props: Props) {
         </Pressable>
 
         <Text numberOfLines={1} style={styles.name}>{user?.name ?? 'Traveler'}</Text>
+        <Text numberOfLines={1} style={styles.username}>@{user?.username ?? 'traveler'}</Text>
         <Text numberOfLines={1} style={styles.email}>{user?.email ?? 'Signed in'}</Text>
       </View>
 
@@ -124,7 +176,10 @@ export function ProfileScreen(_props: Props) {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Account</Text>
         <View style={styles.sectionCard}>
+          <ActionRow icon="create-outline" label="Edit name and username" onPress={openEditProfile} />
           <ActionRow icon="camera-outline" label="Change profile photo" onPress={changeAvatar} loading={avatarUploading} />
+          <ActionRow icon="copy-outline" label="Copy username" onPress={copyUsername} />
+          <InfoRow icon="at-outline" label="Username" value={`@${user?.username ?? 'traveler'}`} />
           <InfoRow icon="mail-outline" label="Email" value={user?.email ?? 'Signed in'} />
         </View>
       </View>
@@ -133,6 +188,21 @@ export function ProfileScreen(_props: Props) {
         <Ionicons name="log-out-outline" size={20} color={colors.white} />
         <Text style={styles.logoutText}>Log Out</Text>
       </Pressable>
+
+      <BottomSheet visible={editVisible} title="Edit Profile" onClose={() => setEditVisible(false)}>
+        <InputField label="Name" value={nameDraft} onChangeText={setNameDraft} placeholder="Your name" />
+        <InputField
+          label="Username"
+          value={usernameDraft}
+          onChangeText={setUsernameDraft}
+          placeholder="your_username"
+          helperText="Usernames are unique and used by friends to find you."
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {profileError ? <Text style={styles.errorText}>{profileError}</Text> : null}
+        <Button label="Save Profile" icon="checkmark-circle-outline" onPress={saveProfile} loading={profileSaving} />
+      </BottomSheet>
     </Screen>
   );
 }
@@ -280,6 +350,13 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 2
   },
+  username: {
+    color: colors.primary,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 14,
+    lineHeight: 18,
+    marginTop: 2
+  },
   statRow: {
     flexDirection: 'row',
     gap: 10
@@ -378,5 +455,9 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.6
+  },
+  errorText: {
+    ...typography.caption,
+    color: colors.danger
   }
 });

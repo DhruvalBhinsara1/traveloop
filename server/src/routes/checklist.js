@@ -3,12 +3,23 @@ import { Router } from 'express';
 import { prisma } from '../prisma.js';
 import { asyncHandler, HttpError, toInt } from '../utils/http.js';
 import { validateChecklistItem } from '../utils/validators.js';
-import { getOwnedTrip } from './trips.js';
+import { getAccessibleTrip } from './trips.js';
 
 export const checklistRouter = Router();
 
 const getOwnedChecklistItem = async (id, userId) => {
-  const item = await prisma.checklistItem.findFirst({ where: { id, trip: { userId } } });
+  const item = await prisma.checklistItem.findFirst({
+    where: {
+      id,
+      trip: {
+        OR: [
+          { userId },
+          { members: { some: { userId } } },
+          { group: { members: { some: { userId } } } }
+        ]
+      }
+    }
+  });
   if (!item) {
     throw new HttpError(404, 'Checklist item not found');
   }
@@ -16,12 +27,12 @@ const getOwnedChecklistItem = async (id, userId) => {
 };
 
 checklistRouter.get('/trips/:tripId/checklist', asyncHandler(async (req, res) => {
-  const trip = await getOwnedTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
+  const trip = await getAccessibleTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
   res.json(trip.checklist);
 }));
 
 checklistRouter.post('/trips/:tripId/checklist', asyncHandler(async (req, res) => {
-  const trip = await getOwnedTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
+  const trip = await getAccessibleTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
   validateChecklistItem(req.body);
 
   const item = await prisma.checklistItem.create({

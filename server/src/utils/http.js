@@ -39,7 +39,24 @@ export const parseDate = (value, field) => {
 export const sanitizeUser = (user) => ({
   id: user.id,
   name: user.name,
+  username: user.username,
   email: user.email,
+  avatarUrl: user.avatarUrl,
+  createdAt: user.createdAt
+});
+
+export const publicUserSelect = {
+  id: true,
+  name: true,
+  username: true,
+  avatarUrl: true,
+  createdAt: true
+};
+
+export const sanitizePublicUser = (user) => ({
+  id: user.id,
+  name: user.name,
+  username: user.username,
   avatarUrl: user.avatarUrl,
   createdAt: user.createdAt
 });

@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Toast from 'react-native-toast-message';
@@ -11,43 +10,46 @@ import { InputField } from '../../components/InputField';
 import { Screen } from '../../components/Screen';
 import { colors, typography } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
-import { validateEmail } from '../../utils/validation';
+import { normalizeUsername, validateEmail, validateUsername } from '../../utils/validation';
 import { AuthStackParamList } from '../../navigation/types';
+import { PickedImage, pickImageFromDevice } from '../../utils/mediaPicker';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Signup'>;
 
 export function SignupScreen({ navigation }: Props) {
   const { signUp, updateAvatar } = useAuth();
   const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [avatar, setAvatar] = useState<{ uri: string; fileName?: string | null; mimeType?: string | null } | null>(null);
+  const [avatar, setAvatar] = useState<PickedImage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const pickAvatar = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setError('Allow photo access to add a profile photo.');
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsEditing: true,
+    const result = await pickImageFromDevice({
+      title: 'Add Profile Photo',
       aspect: [1, 1],
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.82
     });
 
-    if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
-    setAvatar({ uri: asset.uri, fileName: asset.fileName, mimeType: asset.mimeType });
+    if (result.status === 'permission-denied') {
+      setError(result.source === 'camera' ? 'Allow camera access to take a profile photo.' : 'Allow photo access to add a profile photo.');
+      return;
+    }
+
+    if (result.status !== 'selected') return;
+    setAvatar(result.image);
     setError(null);
   };
 
   const submit = async () => {
     if (!name.trim()) {
       setError('Name is required');
+      return;
+    }
+    if (!validateUsername(username)) {
+      setError('Username must be 3-24 letters, numbers, or underscores');
       return;
     }
     if (!validateEmail(email)) {
@@ -60,7 +62,7 @@ export function SignupScreen({ navigation }: Props) {
     }
     setLoading(true);
     try {
-      await signUp(name.trim(), email.trim(), password);
+      await signUp(name.trim(), normalizeUsername(username), email.trim(), password);
       if (avatar) {
         try {
           await updateAvatar(avatar);
@@ -94,6 +96,15 @@ export function SignupScreen({ navigation }: Props) {
           </View>
         </Pressable>
         <InputField label="Name" value={name} onChangeText={setName} placeholder="Riya Sharma" />
+        <InputField
+          label="Username"
+          value={username}
+          onChangeText={setUsername}
+          placeholder="riya_travels"
+          helperText="Friends can find you with this."
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
         <InputField label="Email" value={email} onChangeText={setEmail} placeholder="riya@email.com" keyboardType="email-address" />
         <InputField label="Password" value={password} onChangeText={setPassword} placeholder="8+ characters" secureTextEntry />
         {error ? <Text style={styles.error}>{error}</Text> : null}

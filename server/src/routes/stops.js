@@ -3,13 +3,22 @@ import { Router } from 'express';
 import { prisma } from '../prisma.js';
 import { asyncHandler, HttpError, toInt } from '../utils/http.js';
 import { validateStop } from '../utils/validators.js';
-import { getOwnedTrip } from './trips.js';
+import { getAccessibleTrip } from './trips.js';
 
 export const stopsRouter = Router();
 
 const getOwnedStop = async (stopId, userId) => {
   const stop = await prisma.stop.findFirst({
-    where: { id: stopId, trip: { userId } },
+    where: {
+      id: stopId,
+      trip: {
+        OR: [
+          { userId },
+          { members: { some: { userId } } },
+          { group: { members: { some: { userId } } } }
+        ]
+      }
+    },
     include: { trip: true, activities: true }
   });
 
@@ -21,7 +30,7 @@ const getOwnedStop = async (stopId, userId) => {
 };
 
 stopsRouter.post('/trips/:tripId/stops', asyncHandler(async (req, res) => {
-  const trip = await getOwnedTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
+  const trip = await getAccessibleTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
   const { cityName, country, arrivalDate, departDate, order } = req.body;
   const { arrival, depart } = validateStop(req.body, trip);
   const nextOrder = order ?? trip.stops.length + 1;
@@ -68,7 +77,7 @@ stopsRouter.delete('/stops/:id', asyncHandler(async (req, res) => {
 }));
 
 stopsRouter.patch('/trips/:tripId/stops/reorder', asyncHandler(async (req, res) => {
-  const trip = await getOwnedTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
+  const trip = await getAccessibleTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
   const orderedIds = Array.isArray(req.body.orderedIds) ? req.body.orderedIds.map(Number) : [];
   const currentIds = trip.stops.map((stop) => stop.id);
 
@@ -80,5 +89,5 @@ stopsRouter.patch('/trips/:tripId/stops/reorder', asyncHandler(async (req, res) 
     orderedIds.map((id, index) => prisma.stop.update({ where: { id }, data: { order: index + 1 } }))
   );
 
-  res.json(await getOwnedTrip(trip.id, req.user.id));
+  res.json(await getAccessibleTrip(trip.id, req.user.id));
 }));

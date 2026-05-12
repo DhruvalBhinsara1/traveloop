@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Haptics from 'expo-haptics';
-import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ImageBackground, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -13,11 +12,13 @@ import { activitiesApi } from '../../api/activities';
 import { billsApi } from '../../api/bills';
 import { checklistApi } from '../../api/checklist';
 import { getErrorMessage } from '../../api/client';
+import { socialApi } from '../../api/social';
 import { stopsApi } from '../../api/stops';
 import { tripsApi } from '../../api/trips';
-import { Activity, ActivityCategory, ActivityInput, BillExpense, BillParticipant, BillSplit, ChecklistItem, Stop, StopInput, Trip } from '../../api/types';
+import { Activity, ActivityCategory, ActivityInput, BillExpense, BillParticipant, BillSplit, ChecklistItem, PublicUser, Stop, StopInput, Trip } from '../../api/types';
 import { Button } from '../../components/Button';
 import { ProgressBar } from '../../components/ProgressBar';
+import { useAuth } from '../../context/AuthContext';
 import { colors, fontFamily, radius, shadows, typography } from '../../theme';
 import {
   CATEGORY_COLORS,
@@ -32,6 +33,7 @@ import {
   sortActivitiesByDate
 } from '../../utils/budgetCalc';
 import { formatDate, formatDateRange, getTripDays, nightsBetween } from '../../utils/dateHelpers';
+import { pickImageFromDevice } from '../../utils/mediaPicker';
 import { getDestinationImage } from '../../utils/photos';
 import { shareTrip } from '../../utils/shareHelpers';
 import { RootStackParamList, TripDetailTabParamList } from '../../navigation/types';
@@ -54,6 +56,7 @@ const starterChecklist = [
 const chartColors = [colors.primary, colors.warning, colors.success, colors.gray600, colors.danger, colors.gray400];
 
 export function TripDetailScreen({ route, navigation }: Props) {
+  const { user } = useAuth();
   const [trip, setTrip] = useState<Trip | null>(null);
   const [loading, setLoading] = useState(true);
   const [stopSheetVisible, setStopSheetVisible] = useState(false);
@@ -217,29 +220,26 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const changeCover = async () => {
     if (!trip || coverUploading) return;
 
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Toast.show({ type: 'error', text1: 'Photo access needed', text2: 'Allow photo access to update this trip thumbnail.' });
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsEditing: true,
+    const result = await pickImageFromDevice({
+      title: 'Update Trip Thumbnail',
       aspect: [16, 9],
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.86
     });
 
-    if (result.canceled || !result.assets[0]) return;
+    if (result.status === 'permission-denied') {
+      Toast.show({
+        type: 'error',
+        text1: result.source === 'camera' ? 'Camera access needed' : 'Photo access needed',
+        text2: result.source === 'camera' ? 'Allow camera access to take a trip thumbnail.' : 'Allow photo access to update this trip thumbnail.'
+      });
+      return;
+    }
+
+    if (result.status !== 'selected') return;
 
     setCoverUploading(true);
     try {
-      const asset = result.assets[0];
-      const updated = await tripsApi.updateCover(trip.id, {
-        uri: asset.uri,
-        fileName: asset.fileName,
-        mimeType: asset.mimeType
-      });
+      const updated = await tripsApi.updateCover(trip.id, result.image);
       setTrip(sortTrip(updated));
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       Toast.show({ type: 'success', text1: 'Trip thumbnail updated' });
@@ -270,6 +270,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const sortedStops = [...trip.stops].sort((a, b) => a.order - b.order);
   const coverImage = trip.coverImage ?? getDestinationImage(sortedStops[0]?.cityName ?? trip.title);
   const activityCount = trip.stops.reduce((count, stop) => count + stop.activities.length, 0);
+  const canManageTrip = trip.userId === user?.id;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -282,8 +283,8 @@ export function TripDetailScreen({ route, navigation }: Props) {
         <Pressable
           accessibilityLabel="Change trip thumbnail"
           accessibilityRole="button"
-          accessibilityState={{ disabled: coverUploading, busy: coverUploading }}
-          disabled={coverUploading}
+          accessibilityState={{ disabled: !canManageTrip || coverUploading, busy: coverUploading }}
+          disabled={!canManageTrip || coverUploading}
           onPress={changeCover}
           style={styles.heroPressLayer}
         />
@@ -292,19 +293,23 @@ export function TripDetailScreen({ route, navigation }: Props) {
             <Ionicons name="chevron-back" size={24} color={colors.charcoal} />
           </Pressable>
           <View style={styles.heroRightActions}>
-            <Pressable
-              accessibilityLabel="Change trip thumbnail"
-              accessibilityRole="button"
-              accessibilityState={{ disabled: coverUploading, busy: coverUploading }}
-              disabled={coverUploading}
-              style={[styles.heroIconButton, coverUploading && styles.disabled]}
-              onPress={changeCover}
-            >
-              {coverUploading ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="camera-outline" size={21} color={colors.primary} />}
-            </Pressable>
-            <Pressable accessibilityLabel="Share trip" accessibilityRole="button" style={styles.heroIconButton} onPress={share}>
-              <Ionicons name={trip.isPublic ? 'globe-outline' : 'share-social-outline'} size={21} color={colors.charcoal} />
-            </Pressable>
+            {canManageTrip ? (
+              <>
+                <Pressable
+                  accessibilityLabel="Change trip thumbnail"
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: coverUploading, busy: coverUploading }}
+                  disabled={coverUploading}
+                  style={[styles.heroIconButton, coverUploading && styles.disabled]}
+                  onPress={changeCover}
+                >
+                  {coverUploading ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="camera-outline" size={21} color={colors.primary} />}
+                </Pressable>
+                <Pressable accessibilityLabel="Share trip" accessibilityRole="button" style={styles.heroIconButton} onPress={share}>
+                  <Ionicons name={trip.isPublic ? 'globe-outline' : 'share-social-outline'} size={21} color={colors.charcoal} />
+                </Pressable>
+              </>
+            ) : null}
           </View>
         </View>
       </ImageBackground>
@@ -312,17 +317,19 @@ export function TripDetailScreen({ route, navigation }: Props) {
       <View style={styles.detailCard}>
         <View style={styles.detailTitleRow}>
           <Text numberOfLines={1} style={styles.detailTitle}>{trip.title}</Text>
-          <Pressable
-            accessibilityLabel="Change trip thumbnail"
-            accessibilityRole="button"
-            accessibilityState={{ disabled: coverUploading, busy: coverUploading }}
-            disabled={coverUploading}
-            hitSlop={10}
-            onPress={changeCover}
-            style={[styles.titleEditButton, coverUploading && styles.disabled]}
-          >
-            <Ionicons name="pencil" size={16} color={colors.primary} />
-          </Pressable>
+          {canManageTrip ? (
+            <Pressable
+              accessibilityLabel="Change trip thumbnail"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: coverUploading, busy: coverUploading }}
+              disabled={coverUploading}
+              hitSlop={10}
+              onPress={changeCover}
+              style={[styles.titleEditButton, coverUploading && styles.disabled]}
+            >
+              <Ionicons name="pencil" size={16} color={colors.primary} />
+            </Pressable>
+          ) : null}
         </View>
         <View style={styles.detailMetaGrid}>
           <DetailMeta icon="calendar-outline" label={`${formatDateRange(trip.startDate, trip.endDate)} · ${getTripDays(trip.startDate, trip.endDate)} days`} />
@@ -330,7 +337,14 @@ export function TripDetailScreen({ route, navigation }: Props) {
           <DetailMeta icon="sparkles-outline" label={`${activityCount} ${activityCount === 1 ? 'activity' : 'activities'}`} />
           <DetailMeta icon={trip.isPublic ? 'globe-outline' : 'lock-closed-outline'} label={trip.isPublic ? 'Public' : 'Private'} />
         </View>
-        <PrivacySegment isPublic={trip.isPublic} loading={privacyUpdating} onChange={updateVisibility} />
+        {canManageTrip ? (
+          <PrivacySegment isPublic={trip.isPublic} loading={privacyUpdating} onChange={updateVisibility} />
+        ) : (
+          <View style={styles.collaboratorNotice}>
+            <Ionicons name="people-outline" size={16} color={colors.primary} />
+            <Text style={styles.collaboratorNoticeText}>Shared trip editor</Text>
+          </View>
+        )}
       </View>
 
       <Tab.Navigator
@@ -360,6 +374,9 @@ export function TripDetailScreen({ route, navigation }: Props) {
         </Tab.Screen>
         <Tab.Screen name="Budget">{() => <BudgetTab trip={trip} />}</Tab.Screen>
         <Tab.Screen name="Split">{() => <SplitTab tripId={trip.id} onExpensesChange={syncBillExpenses} />}</Tab.Screen>
+        <Tab.Screen name="Crew">
+          {() => <CrewTab trip={trip} canManage={canManageTrip} onTripChange={(updated) => setTrip(sortTrip(updated))} />}
+        </Tab.Screen>
         <Tab.Screen name="Checklist">
           {() => (
             <ChecklistTab
@@ -755,6 +772,11 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
   };
 
   const removeParticipant = (participant: BillParticipant) => {
+    if (participant.userId) {
+      Toast.show({ type: 'info', text1: 'Trip members stay in split', text2: 'Remove them from Crew if they should lose trip access.' });
+      return;
+    }
+
     Alert.alert('Remove traveler?', `${participant.name} and expenses they paid will be removed from this split.`, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -852,7 +874,7 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
                 style={styles.participantChip}
               >
                 <Text numberOfLines={1} style={styles.participantChipText}>{participant.name}</Text>
-                <Ionicons name="close-circle" size={16} color={colors.gray400} />
+                <Ionicons name={participant.userId ? 'person-circle-outline' : 'close-circle'} size={16} color={colors.gray400} />
               </Pressable>
             ))}
           </View>
@@ -983,6 +1005,224 @@ function ExpenseRow({ expense, onDelete }: { expense: BillExpense; onDelete: () 
       </Pressable>
     </View>
   );
+}
+
+function CrewTab({
+  trip,
+  canManage,
+  onTripChange
+}: {
+  trip: Trip;
+  canManage: boolean;
+  onTripChange: (trip: Trip) => void;
+}) {
+  const [friends, setFriends] = useState<PublicUser[]>([]);
+  const [selectedFriendId, setSelectedFriendId] = useState<number | null>(null);
+  const [loadingFriends, setLoadingFriends] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!canManage) return;
+
+    let mounted = true;
+    setLoadingFriends(true);
+    socialApi.friends()
+      .then((nextFriends) => {
+        if (mounted) setFriends(nextFriends);
+      })
+      .catch((error) => Toast.show({ type: 'error', text1: 'Could not load friends', text2: getErrorMessage(error) }))
+      .finally(() => {
+        if (mounted) setLoadingFriends(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [canManage, trip.id]);
+
+  const directMemberIds = new Set((trip.members ?? []).map((member) => member.userId));
+  const groupMemberIds = new Set((trip.group?.members ?? []).map((member) => member.userId));
+  const unavailableIds = new Set([trip.userId, ...directMemberIds, ...groupMemberIds].filter(Boolean) as number[]);
+  const availableFriends = friends.filter((friend) => !unavailableIds.has(friend.id));
+  const owner = trip.user;
+  const crewUsers = buildCrewUsers(trip);
+
+  const invite = async () => {
+    if (!selectedFriendId || saving) return;
+
+    setSaving(true);
+    try {
+      const updated = await tripsApi.addMember(trip.id, selectedFriendId);
+      setSelectedFriendId(null);
+      onTripChange(updated);
+      Toast.show({ type: 'success', text1: 'Friend added to trip' });
+    } catch (error) {
+      Toast.show({ type: 'error', text1: 'Could not invite friend', text2: getErrorMessage(error) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeDirectMember = (friend: PublicUser) => {
+    Alert.alert('Remove from trip?', `${friend.name} will lose access to this private trip.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            const updated = await tripsApi.removeMember(trip.id, friend.id);
+            onTripChange(updated);
+            Toast.show({ type: 'success', text1: 'Crew updated' });
+          } catch (error) {
+            Toast.show({ type: 'error', text1: 'Could not remove friend', text2: getErrorMessage(error) });
+          }
+        }
+      }
+    ]);
+  };
+
+  return (
+    <ScrollView contentContainerStyle={styles.tabContent}>
+      <View style={styles.crewHero}>
+        <View style={styles.crewHeroIcon}>
+          <Ionicons name="people-outline" size={22} color={colors.primary} />
+        </View>
+        <View style={styles.grow}>
+          <Text style={styles.stopTitle}>Trip Crew</Text>
+          <Text style={styles.meta}>
+            {crewUsers.length} {crewUsers.length === 1 ? 'traveler' : 'travelers'} can edit itinerary, budget, notes, checklist, and split bills.
+          </Text>
+        </View>
+      </View>
+
+      {trip.group ? (
+        <View style={styles.crewGroupCard}>
+          <View style={styles.crewGroupTop}>
+            <View>
+              <Text style={styles.meta}>Group trip</Text>
+              <Text style={styles.itemTitle}>{trip.group.name}</Text>
+            </View>
+            <View style={styles.groupCountPill}>
+              <Text style={styles.groupCountText}>{trip.group.members.length}</Text>
+            </View>
+          </View>
+          <Text style={styles.meta}>Group access updates whenever the group owner changes members.</Text>
+        </View>
+      ) : null}
+
+      {canManage ? (
+        <View style={styles.crewInviteCard}>
+          <View style={styles.splitSectionHeader}>
+            <Text style={styles.stopTitle}>Invite Friend</Text>
+            <Text style={styles.meta}>Friends must accept your request before they can join trips.</Text>
+          </View>
+          {loadingFriends ? (
+            <ActivityIndicator color={colors.primary} />
+          ) : availableFriends.length ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.crewPickerRow}>
+              {availableFriends.map((friend) => {
+                const selected = selectedFriendId === friend.id;
+                return (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    key={friend.id}
+                    onPress={() => setSelectedFriendId(selected ? null : friend.id)}
+                    style={[styles.crewPickerChip, selected && styles.crewPickerChipActive]}
+                  >
+                    <CrewAvatar user={friend} size={28} />
+                    <Text numberOfLines={1} style={[styles.crewPickerText, selected && styles.crewPickerTextActive]}>
+                      {friend.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          ) : (
+            <Text style={styles.meta}>No available friends to invite. Add friends from People first.</Text>
+          )}
+          <Button label="Add to Trip" icon="person-add-outline" disabled={!selectedFriendId || saving} loading={saving} onPress={invite} />
+        </View>
+      ) : null}
+
+      <View style={styles.splitSection}>
+        <View style={styles.splitSectionHeader}>
+          <Text style={styles.stopTitle}>Members</Text>
+          <Text style={styles.meta}>Owner, direct collaborators, and group members.</Text>
+        </View>
+        {owner ? <CrewRow user={owner} role="Owner" /> : null}
+        {(trip.members ?? []).map((member) => (
+          <CrewRow
+            key={`direct-${member.id}`}
+            user={member.user}
+            role="Editor"
+            removable={canManage}
+            onRemove={() => removeDirectMember(member.user)}
+          />
+        ))}
+        {(trip.group?.members ?? []).map((member) => (
+          <CrewRow key={`group-${member.id}`} user={member.user} role="Group" />
+        ))}
+      </View>
+    </ScrollView>
+  );
+}
+
+function CrewRow({
+  user,
+  role,
+  removable,
+  onRemove
+}: {
+  user: PublicUser;
+  role: string;
+  removable?: boolean;
+  onRemove?: () => void;
+}) {
+  return (
+    <View style={styles.crewRow}>
+      <CrewAvatar user={user} size={42} />
+      <View style={styles.grow}>
+        <Text numberOfLines={1} style={styles.itemTitle}>{user.name}</Text>
+        <Text numberOfLines={1} style={styles.meta}>@{user.username} · {role}</Text>
+      </View>
+      {removable && onRemove ? (
+        <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${user.name}`} onPress={onRemove} hitSlop={10}>
+          <Ionicons name="close-circle" size={20} color={colors.gray400} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function CrewAvatar({ user, size }: { user: PublicUser; size: number }) {
+  const initials = user.name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('') || user.username.slice(0, 1).toUpperCase();
+
+  if (user.avatarUrl) {
+    return <ImageBackground source={{ uri: user.avatarUrl }} style={{ width: size, height: size }} imageStyle={{ borderRadius: size / 2 }} />;
+  }
+
+  return (
+    <View style={[styles.crewAvatarFallback, { width: size, height: size, borderRadius: size / 2 }]}>
+      <Text style={[styles.crewAvatarText, { fontSize: Math.max(11, size * 0.34), lineHeight: Math.max(14, size * 0.42) }]}>
+        {initials}
+      </Text>
+    </View>
+  );
+}
+
+function buildCrewUsers(trip: Trip) {
+  const users = new Map<number, PublicUser>();
+  if (trip.user) users.set(trip.user.id, trip.user);
+  (trip.members ?? []).forEach((member) => users.set(member.userId, member.user));
+  (trip.group?.members ?? []).forEach((member) => users.set(member.userId, member.user));
+  return [...users.values()];
 }
 
 function ChecklistTab({
@@ -1268,6 +1508,24 @@ const styles = StyleSheet.create({
   },
   privacyOptionTextActive: {
     color: colors.white
+  },
+  collaboratorNotice: {
+    minHeight: 42,
+    borderRadius: radius.pill,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    backgroundColor: colors.primaryLight,
+    borderWidth: 1,
+    borderColor: colors.border
+  },
+  collaboratorNoticeText: {
+    color: colors.primary,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 13,
+    lineHeight: 17
   },
   header: {
     minHeight: 70,
@@ -1796,6 +2054,111 @@ const styles = StyleSheet.create({
   },
   splitSectionHeader: {
     gap: 2
+  },
+  crewHero: {
+    minHeight: 78,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    ...shadows.subtle
+  },
+  crewHeroIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryLight
+  },
+  crewGroupCard: {
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: 14,
+    gap: 8
+  },
+  crewGroupTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12
+  },
+  groupCountPill: {
+    minWidth: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryLight
+  },
+  groupCountText: {
+    color: colors.primary,
+    fontFamily: fontFamily.headingBold,
+    fontSize: 14,
+    lineHeight: 18
+  },
+  crewInviteCard: {
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: 14,
+    gap: 12,
+    ...shadows.subtle
+  },
+  crewPickerRow: {
+    gap: 8,
+    paddingRight: 20
+  },
+  crewPickerChip: {
+    maxWidth: 180,
+    minHeight: 42,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.gray50,
+    paddingHorizontal: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  crewPickerChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight
+  },
+  crewPickerText: {
+    color: colors.gray600,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 12,
+    lineHeight: 16,
+    maxWidth: 122
+  },
+  crewPickerTextActive: {
+    color: colors.primary
+  },
+  crewRow: {
+    minHeight: 62,
+    borderRadius: radius.lg,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.gray50
+  },
+  crewAvatarFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary
+  },
+  crewAvatarText: {
+    color: colors.white,
+    fontFamily: fontFamily.headingBold
   },
   participantGrid: {
     flexDirection: 'row',

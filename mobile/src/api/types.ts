@@ -1,12 +1,64 @@
 export type User = {
   id: number;
   name: string;
+  username: string;
   email: string;
   avatarUrl?: string | null;
   createdAt?: string;
 };
 
 export type Id = number;
+
+export type PublicUser = Pick<User, 'id' | 'name' | 'username' | 'avatarUrl' | 'createdAt'>;
+
+export type UserRelationship = 'none' | 'friend' | 'request_sent' | 'request_received';
+
+export type UserSearchResult = PublicUser & {
+  relationship: UserRelationship;
+};
+
+export type FriendRequest = {
+  id: number;
+  requesterId: number;
+  recipientId: number;
+  status: 'pending' | 'accepted' | 'declined';
+  createdAt: string;
+  respondedAt?: string | null;
+  requester: PublicUser;
+  recipient: PublicUser;
+};
+
+export type FriendRequestsResponse = {
+  incoming: FriendRequest[];
+  outgoing: FriendRequest[];
+};
+
+export type FriendGroupMember = {
+  id: number;
+  groupId: number;
+  userId: number;
+  createdAt: string;
+  user: PublicUser;
+};
+
+export type FriendGroup = {
+  id: number;
+  name: string;
+  ownerId: number;
+  owner?: PublicUser;
+  members: FriendGroupMember[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TripMember = {
+  id: number;
+  role: 'editor' | string;
+  tripId: number;
+  userId: number;
+  user: PublicUser;
+  createdAt: string;
+};
 
 export type ActivityCategory = 'sightseeing' | 'food' | 'adventure' | 'transport' | 'stay' | 'other';
 export type ChecklistCategory = 'clothing' | 'documents' | 'electronics' | 'toiletries' | 'health' | 'other';
@@ -53,6 +105,8 @@ export type BillParticipant = {
   id: number;
   name: string;
   tripId: number;
+  userId?: number | null;
+  user?: PublicUser | null;
   createdAt: string;
 };
 
@@ -102,7 +156,10 @@ export type Trip = {
   isPublic: boolean;
   shareToken?: string | null;
   userId?: number;
-  user?: Pick<User, 'name' | 'avatarUrl'>;
+  groupId?: number | null;
+  user?: PublicUser;
+  members?: TripMember[];
+  group?: FriendGroup | null;
   stops: Stop[];
   checklist: ChecklistItem[];
   notes: Note[];
@@ -124,6 +181,8 @@ export type TripInput = {
   budget?: number | null;
   coverImage?: string | null;
   isPublic?: boolean;
+  memberIds?: number[];
+  groupId?: number | null;
 };
 
 export type StopInput = {
@@ -150,6 +209,7 @@ export type LoginPayload = {
 
 export type RegisterPayload = {
   name: string;
+  username: string;
   email: string;
   password: string;
 };

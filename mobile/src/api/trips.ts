@@ -45,6 +45,14 @@ export const tripsApi = {
     });
     return data;
   },
+  addMember: async (id: number, userId: number) => {
+    const { data } = await client.post<Trip>(`/api/trips/${id}/members`, { userId });
+    return data;
+  },
+  removeMember: async (id: number, userId: number) => {
+    const { data } = await client.delete<Trip>(`/api/trips/${id}/members/${userId}`);
+    return data;
+  },
   addStop: async (tripId: number, payload: StopInput) => {
     const { data } = await client.post(`/api/trips/${tripId}/stops`, payload);
     return data;

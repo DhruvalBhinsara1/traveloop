@@ -7,7 +7,18 @@ import { validateActivity } from '../utils/validators.js';
 export const activitiesRouter = Router();
 
 const getOwnedStop = async (stopId, userId) => {
-  const stop = await prisma.stop.findFirst({ where: { id: stopId, trip: { userId } } });
+  const stop = await prisma.stop.findFirst({
+    where: {
+      id: stopId,
+      trip: {
+        OR: [
+          { userId },
+          { members: { some: { userId } } },
+          { group: { members: { some: { userId } } } }
+        ]
+      }
+    }
+  });
   if (!stop) {
     throw new HttpError(404, 'Stop not found');
   }
@@ -16,7 +27,18 @@ const getOwnedStop = async (stopId, userId) => {
 
 const getOwnedActivity = async (id, userId) => {
   const activity = await prisma.activity.findFirst({
-    where: { id, stop: { trip: { userId } } }
+    where: {
+      id,
+      stop: {
+        trip: {
+          OR: [
+            { userId },
+            { members: { some: { userId } } },
+            { group: { members: { some: { userId } } } }
+          ]
+        }
+      }
+    }
   });
   if (!activity) {
     throw new HttpError(404, 'Activity not found');
