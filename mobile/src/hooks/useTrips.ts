@@ -1,31 +1,58 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getErrorMessage } from '../api/client';
 import { tripsApi } from '../api/trips';
 import { Trip, TripInput } from '../api/types';
+import { useFocusedAutoRefresh } from './useFocusedAutoRefresh';
 
-export function useTrips() {
+type UseTripsOptions = {
+  autoRefresh?: boolean;
+  refreshIntervalMs?: number;
+};
+
+type RefreshOptions = {
+  silent?: boolean;
+};
+
+export function useTrips({ autoRefresh = false, refreshIntervalMs = 10000 }: UseTripsOptions = {}) {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestRef = useRef<Promise<void> | null>(null);
 
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      setTrips(await tripsApi.list());
-      setError(null);
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+  const refresh = useCallback(async ({ silent = false }: RefreshOptions = {}) => {
+    if (requestRef.current) return requestRef.current;
+
+    if (!silent) setRefreshing(true);
+
+    const request = tripsApi
+      .list()
+      .then((nextTrips) => {
+        setTrips(nextTrips);
+        setError(null);
+      })
+      .catch((err) => {
+        if (!silent) setError(getErrorMessage(err));
+      })
+      .finally(() => {
+        setLoading(false);
+        if (!silent) setRefreshing(false);
+        requestRef.current = null;
+      });
+
+    requestRef.current = request;
+    return request;
   }, []);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useFocusedAutoRefresh(() => refresh({ silent: true }), {
+    enabled: autoRefresh,
+    intervalMs: refreshIntervalMs
+  });
 
   const createTrip = useCallback(
     async (payload: TripInput) => {

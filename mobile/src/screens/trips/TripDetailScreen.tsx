@@ -1,11 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { GlassView } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, ImageBackground, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, ImageBackground, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
 import { PieChart } from 'react-native-gifted-charts';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 
 import { activitiesApi } from '../../api/activities';
@@ -19,6 +21,7 @@ import { Activity, ActivityCategory, ActivityInput, BillExpense, BillParticipant
 import { Button } from '../../components/Button';
 import { ProgressBar } from '../../components/ProgressBar';
 import { useAuth } from '../../context/AuthContext';
+import { useFocusedAutoRefresh } from '../../hooks/useFocusedAutoRefresh';
 import { colors, fontFamily, radius, shadows, typography } from '../../theme';
 import {
   CATEGORY_COLORS,
@@ -57,27 +60,44 @@ const chartColors = [colors.primary, colors.warning, colors.success, colors.gray
 
 export function TripDetailScreen({ route, navigation }: Props) {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const [trip, setTrip] = useState<Trip | null>(null);
   const [loading, setLoading] = useState(true);
   const [stopSheetVisible, setStopSheetVisible] = useState(false);
   const [activityStop, setActivityStop] = useState<Stop | null>(null);
   const [coverUploading, setCoverUploading] = useState(false);
   const [privacyUpdating, setPrivacyUpdating] = useState(false);
+  const loadingTripRef = useRef<Promise<void> | null>(null);
 
-  const loadTrip = useCallback(async () => {
-    try {
-      const data = await tripsApi.get(route.params.tripId);
-      setTrip(sortTrip(data));
-    } catch (error) {
-      Toast.show({ type: 'error', text1: 'Could not load trip', text2: getErrorMessage(error) });
-    } finally {
-      setLoading(false);
-    }
+  const loadTrip = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (loadingTripRef.current) return loadingTripRef.current;
+
+    const request = tripsApi
+      .get(route.params.tripId)
+      .then((data) => {
+        setTrip(sortTrip(data));
+      })
+      .catch((error) => {
+        if (!silent) {
+          Toast.show({ type: 'error', text1: 'Could not load trip', text2: getErrorMessage(error) });
+        }
+      })
+      .finally(() => {
+        setLoading(false);
+        loadingTripRef.current = null;
+      });
+
+    loadingTripRef.current = request;
+    return request;
   }, [route.params.tripId]);
 
   useEffect(() => {
     loadTrip();
   }, [loadTrip]);
+
+  useFocusedAutoRefresh(() => loadTrip({ silent: true }), {
+    enabled: Boolean(trip) && !coverUploading && !privacyUpdating && !stopSheetVisible && !activityStop
+  });
 
   const addStop = async (payload: StopInput) => {
     if (!trip) return;
@@ -271,12 +291,14 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const coverImage = trip.coverImage ?? getDestinationImage(sortedStops[0]?.cityName ?? trip.title);
   const activityCount = trip.stops.reduce((count, stop) => count + stop.activities.length, 0);
   const canManageTrip = trip.userId === user?.id;
+  const heroActionTop = Math.max((Platform.OS === 'android' ? StatusBar.currentHeight ?? insets.top : insets.top) + 12, 18);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.safeArea}>
+      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
       <ImageBackground source={{ uri: coverImage }} resizeMode="cover" style={styles.detailHero}>
         <LinearGradient
-          colors={['rgba(15,23,20,0.18)', 'rgba(15,23,20,0.48)']}
+          colors={['rgba(15,23,20,0.54)', 'rgba(15,23,20,0.12)', 'rgba(15,23,20,0.50)']}
           pointerEvents="none"
           style={styles.detailHeroScrim}
         />
@@ -288,8 +310,9 @@ export function TripDetailScreen({ route, navigation }: Props) {
           onPress={changeCover}
           style={styles.heroPressLayer}
         />
-        <View style={styles.heroActions}>
+        <View style={[styles.heroActions, { top: heroActionTop }]}>
           <Pressable accessibilityLabel="Go back" accessibilityRole="button" style={styles.heroIconButton} onPress={() => navigation.goBack()}>
+            <GlassView colorScheme="light" glassEffectStyle="regular" tintColor="rgba(255,255,255,0.58)" style={styles.heroGlassFill} />
             <Ionicons name="chevron-back" size={24} color={colors.charcoal} />
           </Pressable>
           <View style={styles.heroRightActions}>
@@ -303,9 +326,11 @@ export function TripDetailScreen({ route, navigation }: Props) {
                   style={[styles.heroIconButton, coverUploading && styles.disabled]}
                   onPress={changeCover}
                 >
+                  <GlassView colorScheme="light" glassEffectStyle="regular" tintColor="rgba(255,255,255,0.58)" style={styles.heroGlassFill} />
                   {coverUploading ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="camera-outline" size={21} color={colors.primary} />}
                 </Pressable>
                 <Pressable accessibilityLabel="Share trip" accessibilityRole="button" style={styles.heroIconButton} onPress={share}>
+                  <GlassView colorScheme="light" glassEffectStyle="regular" tintColor="rgba(255,255,255,0.58)" style={styles.heroGlassFill} />
                   <Ionicons name={trip.isPublic ? 'globe-outline' : 'share-social-outline'} size={21} color={colors.charcoal} />
                 </Pressable>
               </>
@@ -399,7 +424,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
           setActivityStop(null);
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -1301,9 +1326,10 @@ function NotesTab({ trip, onSave }: { trip: Trip; onSave: (content: string) => P
   const lastSaved = useRef(initial);
 
   useEffect(() => {
+    if (content !== lastSaved.current) return;
     setContent(initial);
     lastSaved.current = initial;
-  }, [initial, trip.id]);
+  }, [content, initial, trip.id]);
 
   useEffect(() => {
     if (content === lastSaved.current) return;
@@ -1391,7 +1417,7 @@ function withAlpha(hex: string, alpha: number) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.white
+    backgroundColor: colors.background
   },
   centered: {
     flex: 1,
@@ -1402,8 +1428,8 @@ const styles = StyleSheet.create({
     gap: 16
   },
   detailHero: {
-    height: 218,
-    backgroundColor: colors.gray100,
+    height: Platform.OS === 'ios' ? 284 : 250,
+    backgroundColor: colors.charcoal,
     position: 'relative'
   },
   detailHeroScrim: {
@@ -1416,7 +1442,6 @@ const styles = StyleSheet.create({
   },
   heroActions: {
     position: 'absolute',
-    top: 14,
     left: 16,
     right: 16,
     zIndex: 2,
@@ -1434,7 +1459,14 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.frostedWhite
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.76)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.68)'
+  },
+  heroGlassFill: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 22
   },
   detailCard: {
     marginTop: -30,

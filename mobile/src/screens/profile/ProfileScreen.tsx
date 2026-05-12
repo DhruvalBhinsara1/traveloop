@@ -1,8 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import { useFocusEffect } from '@react-navigation/native';
-import * as Clipboard from 'expo-clipboard';
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import Toast from 'react-native-toast-message';
 
@@ -22,19 +20,13 @@ type Props = BottomTabScreenProps<MainTabParamList, 'Profile'>;
 
 export function ProfileScreen({ navigation }: Props) {
   const { user, signOut, updateAvatar, updateProfile } = useAuth();
-  const { stats, loadTrips } = useTrips();
+  const { stats } = useTrips({ autoRefresh: true });
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [editVisible, setEditVisible] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [usernameDraft, setUsernameDraft] = useState('');
   const [profileError, setProfileError] = useState<string | null>(null);
   const [profileSaving, setProfileSaving] = useState(false);
-
-  useFocusEffect(
-    useCallback(() => {
-      loadTrips();
-    }, [loadTrips])
-  );
 
   const initials = useMemo(() => {
     return (
@@ -83,12 +75,6 @@ export function ProfileScreen({ navigation }: Props) {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Log Out', style: 'destructive', onPress: signOut }
     ]);
-  };
-
-  const copyUsername = async () => {
-    if (!user?.username) return;
-    await Clipboard.setStringAsync(user.username);
-    Toast.show({ type: 'success', text1: 'Username copied' });
   };
 
   const openEditProfile = () => {
@@ -188,8 +174,6 @@ export function ProfileScreen({ navigation }: Props) {
         <Text style={styles.sectionTitle}>Account</Text>
         <View style={styles.groupCard}>
           <ProfileRow icon="camera-outline" label="Profile photo" value="Change" onPress={changeAvatar} loading={avatarUploading} />
-          <ProfileRow icon="copy-outline" label="Username" value={`@${user?.username ?? 'traveler'}`} onPress={copyUsername} />
-          <InfoRow icon="mail-outline" label="Email" value={user?.email ?? 'Signed in'} />
           <ProfileRow icon="log-out-outline" label="Logout" onPress={confirmLogout} danger isLast />
         </View>
       </View>
@@ -254,20 +238,6 @@ function ProfileRow({
       {value ? <Text numberOfLines={1} style={styles.rowInlineValue}>{value}</Text> : null}
       {!danger ? <Ionicons name="chevron-forward" size={18} color={colors.gray400} /> : null}
     </Pressable>
-  );
-}
-
-function InfoRow({ icon, label, value, isLast }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string; isLast?: boolean }) {
-  return (
-    <View style={[styles.row, isLast && styles.rowLast]}>
-      <View style={styles.rowIcon}>
-        <Ionicons name={icon} size={19} color={colors.charcoal} />
-      </View>
-      <View style={styles.rowCopy}>
-        <Text style={styles.rowLabel}>{label}</Text>
-        <Text numberOfLines={1} style={styles.rowValue}>{value}</Text>
-      </View>
-    </View>
   );
 }
 
@@ -407,10 +377,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.dangerSoft,
     borderColor: colors.dangerSoft
   },
-  rowCopy: {
-    flex: 1,
-    minWidth: 0
-  },
   rowLabel: {
     color: colors.charcoal,
     fontFamily: fontFamily.bodyMedium,
@@ -429,13 +395,6 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.body,
     fontSize: 13,
     lineHeight: 18
-  },
-  rowValue: {
-    color: colors.textMuted,
-    fontFamily: fontFamily.body,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 2
   },
   badge: {
     minWidth: 28,

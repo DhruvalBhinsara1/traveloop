@@ -80,7 +80,7 @@ export function Screen({
   );
 
   return (
-    <Container style={[styles.root, { backgroundColor }, style]} {...viewProps}>
+    <Container style={[styles.root, safeArea && styles.androidStatusInset, { backgroundColor }, style]} {...viewProps}>
       <StatusBar barStyle={statusBarStyle} backgroundColor={backgroundColor} />
       {keyboardAvoiding ? (
         <KeyboardAvoidingView
@@ -99,6 +99,9 @@ export function Screen({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+  },
+  androidStatusInset: {
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight ?? 0 : 0,
   },
   flex: {
     flex: 1,

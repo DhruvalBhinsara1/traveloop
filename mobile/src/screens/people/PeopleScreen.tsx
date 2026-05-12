@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
-import { ReactNode, useCallback, useMemo, useState } from 'react';
+import { ReactNode, useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -22,6 +22,7 @@ import { Button } from '../../components/Button';
 import { InputField } from '../../components/InputField';
 import { Screen } from '../../components/Screen';
 import { useAuth } from '../../context/AuthContext';
+import { useFocusedAutoRefresh } from '../../hooks/useFocusedAutoRefresh';
 import { MainTabParamList } from '../../navigation/types';
 import { colors, fontFamily, radius, shadows, spacing, typography } from '../../theme';
 import { normalizeUsername } from '../../utils/validation';
@@ -42,23 +43,34 @@ export function PeopleScreen(_props: Props) {
   const [groupName, setGroupName] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<number[]>([]);
   const [savingGroup, setSavingGroup] = useState(false);
+  const peopleRequestRef = useRef<Promise<void> | null>(null);
 
-  const loadPeople = useCallback(async () => {
-    try {
-      const [nextFriends, requests, nextGroups] = await Promise.all([
-        socialApi.friends(),
-        socialApi.requests(),
-        socialApi.groups()
-      ]);
-      setFriends(nextFriends);
-      setIncoming(requests.incoming);
-      setOutgoing(requests.outgoing);
-      setGroups(nextGroups);
-    } catch (error) {
-      Toast.show({ type: 'error', text1: 'Could not load people', text2: getErrorMessage(error) });
-    } finally {
-      setLoading(false);
-    }
+  const loadPeople = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (peopleRequestRef.current) return peopleRequestRef.current;
+
+    const request = Promise.all([
+      socialApi.friends(),
+      socialApi.requests(),
+      socialApi.groups()
+    ])
+      .then(([nextFriends, requests, nextGroups]) => {
+        setFriends(nextFriends);
+        setIncoming(requests.incoming);
+        setOutgoing(requests.outgoing);
+        setGroups(nextGroups);
+      })
+      .catch((error) => {
+        if (!silent) {
+          Toast.show({ type: 'error', text1: 'Could not load people', text2: getErrorMessage(error) });
+        }
+      })
+      .finally(() => {
+        setLoading(false);
+        peopleRequestRef.current = null;
+      });
+
+    peopleRequestRef.current = request;
+    return request;
   }, []);
 
   useFocusEffect(
@@ -66,6 +78,10 @@ export function PeopleScreen(_props: Props) {
       loadPeople();
     }, [loadPeople])
   );
+
+  useFocusedAutoRefresh(() => loadPeople({ silent: true }), {
+    enabled: !searching && !groupVisible && !savingGroup
+  });
 
   const outgoingUserIds = useMemo(() => new Set(outgoing.map((request) => request.recipientId)), [outgoing]);
 

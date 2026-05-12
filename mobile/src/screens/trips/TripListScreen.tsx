@@ -17,7 +17,7 @@ type Props = {
 type Filter = 'All' | 'Upcoming' | 'Past';
 
 export function TripListScreen({ navigation }: Props) {
-  const { trips, refreshing, refresh, createTrip, deleteTrip } = useTrips();
+  const { trips, refreshing, refresh, createTrip, deleteTrip } = useTrips({ autoRefresh: true });
   const [filter, setFilter] = useState<Filter>('All');
   const [createVisible, setCreateVisible] = useState(false);
   const hasTrips = trips.length > 0;

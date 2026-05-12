@@ -1,21 +1,23 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Image,
   ImageBackground,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
+  StatusBar,
   Text,
   useWindowDimensions,
   View
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Stop, Trip } from '../../api/types';
-import { TripCard } from '../../components/Card';
-import { Screen } from '../../components/Screen';
-import { colors, fontFamily, radius, shadows, typography } from '../../theme';
+import { colors, fontFamily, layout, radius, shadows, typography } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTrips } from '../../hooks/useTrips';
 import { calcStopSubtotal, calcTripTotal, formatMoney } from '../../utils/budgetCalc';
@@ -33,18 +35,22 @@ type PlacePreview = {
   trip: Trip;
 };
 
+type PlanningToolKey = 'new' | 'itinerary' | 'budget' | 'checklist';
+
 const CONTENT_PADDING = 20;
-const TOOL_GAP = 10;
 const MAX_TIMELINE_STOPS = 3;
 
 export function DashboardScreen({ navigation }: Props) {
   const { user } = useAuth();
-  const { trips, refreshing, refresh, createTrip } = useTrips();
+  const { trips, refreshing, refresh, createTrip } = useTrips({ autoRefresh: true });
   const [createVisible, setCreateVisible] = useState(false);
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const contentWidth = Math.max(0, width - CONTENT_PADDING * 2);
-  const recentCardWidth = Math.min(270, contentWidth * 0.76);
-  const placeCardWidth = Math.min(190, contentWidth * 0.5);
+  const placeCardWidth = Math.min(158, contentWidth * 0.43);
+  const topEdgeFill = Math.max(insets.top + 154, 190);
+  const bottomEdgeFill = Math.max(insets.bottom + 92, 118);
+  const scrollTopInset = Math.max(insets.top, 0);
 
   const sortedTrips = useMemo(() => {
     return [...trips].sort((a, b) => getTripTime(b) - getTripTime(a));
@@ -58,10 +64,22 @@ export function DashboardScreen({ navigation }: Props) {
   }, [sortedTrips, trips]);
 
   const places = useMemo(() => getRealPlaces(sortedTrips), [sortedTrips]);
-  const recentTrips = sortedTrips.filter((trip) => trip.id !== nextTrip?.id).slice(0, 4);
   const firstName = user?.name?.split(' ')[0] ?? 'Traveler';
 
-  const openTrip = (trip: Trip, initialTab?: keyof TripDetailTabParamList) => navigation.navigate('TripDetail', { tripId: trip.id, initialTab });
+  useFocusEffect(
+    useCallback(() => {
+      StatusBar.setBarStyle('light-content', true);
+
+      return () => {
+        StatusBar.setBarStyle('dark-content', true);
+      };
+    }, [])
+  );
+
+  const openTrip = (trip: Trip, initialTab?: keyof TripDetailTabParamList) => {
+    navigation.navigate('TripDetail', { tripId: trip.id, initialTab });
+  };
+
   const openPlanningTool = (tool: PlanningToolKey) => {
     if (tool === 'new' || !nextTrip) {
       setCreateVisible(true);
@@ -78,80 +96,100 @@ export function DashboardScreen({ navigation }: Props) {
   };
 
   return (
-    <Screen
-      backgroundColor={colors.background}
-      contentContainerStyle={styles.screenContent}
-      onRefresh={refresh}
-      refreshing={refreshing}
-    >
-      <View style={styles.header}>
-        <View style={styles.headerCopy}>
-          <Text numberOfLines={1} style={styles.greeting}>
-            Hi, {firstName} 👋
-          </Text>
-          <Text numberOfLines={1} style={styles.subtitle}>Where are we planning next?</Text>
-        </View>
-        <Pressable
-          accessibilityLabel="Open profile"
-          accessibilityRole="button"
-          hitSlop={2}
-          onPress={() => navigation.navigate('Profile')}
-          style={({ pressed }) => [styles.avatarButton, pressed && styles.pressed]}
+    <View style={styles.root}>
+      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
+      <LinearGradient
+        colors={[colors.heroBlue, colors.heroBlueDeep]}
+        end={{ x: 1, y: 1 }}
+        pointerEvents="none"
+        start={{ x: 0, y: 0 }}
+        style={[styles.topEdgeFill, { height: topEdgeFill }]}
+      />
+      <View pointerEvents="none" style={[styles.bottomEdgeFill, { height: bottomEdgeFill }]} />
+
+      <ScrollView
+        alwaysBounceVertical={false}
+        contentInsetAdjustmentBehavior="never"
+        contentContainerStyle={[
+          styles.screenContent,
+          { paddingBottom: bottomEdgeFill + 24, paddingTop: 12 }
+        ]}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={refresh} />}
+        showsVerticalScrollIndicator={false}
+        style={[styles.scroll, { marginTop: scrollTopInset }]}
+      >
+        <LinearGradient
+          colors={[colors.heroBlue, colors.heroBlueDeep]}
+          end={{ x: 1, y: 1 }}
+          start={{ x: 0, y: 0 }}
+          style={styles.heroPanel}
         >
-          {user?.avatarUrl ? (
-            <Image source={{ uri: user.avatarUrl }} style={styles.avatarImage} />
+          <View style={styles.header}>
+            <View style={styles.headerCopy}>
+              <View style={styles.greetingRow}>
+                <Text numberOfLines={1} style={styles.greeting}>
+                  Hi, {firstName}
+                </Text>
+                <Image
+                  accessibilityIgnoresInvertColors
+                  resizeMode="cover"
+                  source={require('../../assets/wave.png')}
+                  style={styles.waveIcon}
+                />
+              </View>
+              <Text numberOfLines={1} style={styles.subtitle}>Where to next?</Text>
+            </View>
+
+            <Pressable
+              accessibilityLabel="Open profile"
+              accessibilityRole="button"
+              hitSlop={2}
+              onPress={() => navigation.navigate('Profile')}
+              style={({ pressed }) => [styles.avatarButton, pressed && styles.pressed]}
+            >
+              {user?.avatarUrl ? (
+                <Image source={{ uri: user.avatarUrl }} style={styles.avatarImage} />
+              ) : (
+                <Text style={styles.avatarInitial}>{firstName.charAt(0).toUpperCase()}</Text>
+              )}
+            </Pressable>
+          </View>
+
+          {nextTrip ? (
+            <NextTripCard trip={nextTrip} onPress={() => openTrip(nextTrip)} />
           ) : (
-            <Text style={styles.avatarInitial}>{firstName.charAt(0).toUpperCase()}</Text>
+            <EmptyJourneyCard onCreate={() => setCreateVisible(true)} />
           )}
-        </Pressable>
-      </View>
+        </LinearGradient>
 
-      {nextTrip ? (
-        <NextTripCard trip={nextTrip} onPress={() => openTrip(nextTrip)} />
-      ) : (
-        <EmptyJourneyCard onCreate={() => setCreateVisible(true)} />
-      )}
+        <View style={styles.bodySurface}>
+          <View style={styles.section}>
+            <DashboardSectionHeader title="Planning Tools" />
+            <PlanningTools activeTrip={nextTrip} onPress={openPlanningTool} />
+          </View>
 
-      <TimelineSection trip={nextTrip} onPress={() => (nextTrip ? openTrip(nextTrip) : setCreateVisible(true))} />
+          <TimelineSection trip={nextTrip} onPress={() => (nextTrip ? openTrip(nextTrip, 'Itinerary') : setCreateVisible(true))} />
 
-      <View style={styles.section}>
-        <DashboardSectionHeader title="Planning Tools" />
-        <PlanningTools activeTrip={nextTrip} onPress={openPlanningTool} />
-      </View>
-
-      {recentTrips.length ? (
-        <View style={styles.section}>
-          <DashboardSectionHeader title="Recent Trips" />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.horizontalList}
-          >
-            {recentTrips.map((trip) => (
-              <View key={trip.id} style={[styles.recentCard, { width: recentCardWidth }]}>
-                <TripCard trip={trip} height={132} onPress={() => openTrip(trip)} />
+          <View style={styles.section}>
+            <DashboardSectionHeader title="Places From Your Trips" />
+            {places.length ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalList}>
+                {places.slice(0, 8).map(({ stop, trip }) => (
+                  <View key={`${trip.id}-${stop.id}`} style={[styles.placeCardWrap, { width: placeCardWidth }]}>
+                    <PlaceCard place={stop} trip={trip} onPress={() => openTrip(trip)} />
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <View style={styles.placesEmpty}>
+                <Ionicons name="images-outline" size={20} color={colors.primary} />
+                <Text style={styles.placesEmptyText}>Your trip places will appear here after you add stops.</Text>
               </View>
-            ))}
-          </ScrollView>
+            )}
+          </View>
         </View>
-      ) : null}
-
-      {places.length ? (
-        <View style={styles.section}>
-          <DashboardSectionHeader title="Places From Your Trips" />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.horizontalList}
-          >
-            {places.slice(0, 8).map(({ stop, trip }) => (
-              <View key={`${trip.id}-${stop.id}`} style={[styles.placeCardWrap, { width: placeCardWidth }]}>
-                <PlaceCard place={stop} trip={trip} onPress={() => openTrip(trip)} />
-              </View>
-            ))}
-          </ScrollView>
-        </View>
-      ) : null}
+      </ScrollView>
 
       <CreateTripSheet
         visible={createVisible}
@@ -159,7 +197,7 @@ export function DashboardScreen({ navigation }: Props) {
         onSubmit={createTrip}
         onCreated={(trip) => navigation.navigate('TripDetail', { tripId: trip.id, initialTab: 'Itinerary' })}
       />
-    </Screen>
+    </View>
   );
 }
 
@@ -181,38 +219,38 @@ function NextTripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
     >
       <ImageBackground source={{ uri: coverImage }} resizeMode="cover" style={styles.nextCardImage}>
         <LinearGradient
-          colors={['rgba(15,23,20,0.08)', 'rgba(15,23,20,0.28)', 'rgba(15,23,20,0.82)']}
-          locations={[0, 0.46, 1]}
+          colors={['rgba(15,23,20,0.08)', 'rgba(15,23,20,0.34)', 'rgba(15,23,20,0.86)']}
+          locations={[0, 0.5, 1]}
           style={styles.nextOverlay}
         >
-          <View style={styles.nextTopRow}>
-            <View style={styles.nextAction}>
-              <Ionicons name="ellipsis-horizontal" size={18} color={colors.charcoal} />
-            </View>
-          </View>
-
           <View style={styles.nextCopy}>
             <Text numberOfLines={1} style={styles.nextTitle}>{trip.title}</Text>
-            <View style={styles.nextMetaRow}>
-              <Ionicons name="calendar-clear-outline" size={13} color="rgba(255,255,255,0.86)" />
-              <Text numberOfLines={1} style={styles.nextMeta}>
-                {formatDateRange(trip.startDate, trip.endDate)} · {getTripDays(trip.startDate, trip.endDate)} days
-              </Text>
-            </View>
-            <View style={styles.nextChipRow}>
-              <MetricChip icon="map-outline" label={plural(cityCount, 'city')} />
-              <MetricChip icon="sparkles-outline" label={plural(activityCount, 'activity')} />
-              <MetricChip icon="wallet-outline" label={budget ? `${budgetPercent}% budget` : 'Budget open'} />
+            <Text numberOfLines={1} style={styles.nextMeta}>
+              {formatDateRange(trip.startDate, trip.endDate)} · {getTripDays(trip.startDate, trip.endDate)} days
+            </Text>
+            <View style={styles.nextMetricRow}>
+              <MetricColumn value={`${cityCount}`} label={cityCount === 1 ? 'city' : 'cities'} />
+              <MetricColumn value={`${activityCount}`} label={activityCount === 1 ? 'activity' : 'activities'} />
+              <MetricColumn value={budget ? `${budgetPercent}%` : '0%'} label="budget" />
             </View>
           </View>
 
           <View style={styles.continuePill}>
             <Text style={styles.continueText}>Continue Planning</Text>
-            <Ionicons name="arrow-forward" size={18} color={colors.charcoal} />
+            <Ionicons name="arrow-forward" size={24} color={colors.heroBlue} />
           </View>
         </LinearGradient>
       </ImageBackground>
     </Pressable>
+  );
+}
+
+function MetricColumn({ value, label }: { value: string; label: string }) {
+  return (
+    <View style={styles.metricColumn}>
+      <Text numberOfLines={1} style={styles.metricValue}>{value}</Text>
+      <Text numberOfLines={1} style={styles.metricLabel}>{label}</Text>
+    </View>
   );
 }
 
@@ -244,21 +282,17 @@ function TimelineSection({ trip, onPress }: { trip?: Trip; onPress: () => void }
 
   return (
     <View style={styles.section}>
-      <DashboardSectionHeader
-        actionLabel="View All"
-        onAction={onPress}
-        title="Itinerary Timeline"
-        titleSuffix="Preview"
-      />
+      <DashboardSectionHeader title="Itinerary Timeline" onAction={onPress} />
       <TimelinePreview trip={trip} onPress={onPress} />
     </View>
   );
 }
 
 function TimelinePreview({ trip, onPress }: { trip: Trip; onPress: () => void }) {
-  const stops = [...(trip.stops ?? [])].sort((a, b) => a.order - b.order).slice(0, MAX_TIMELINE_STOPS);
+  const stops = [...(trip.stops ?? [])].sort((a, b) => a.order - b.order);
+  const featuredStop = stops[0];
 
-  if (!stops.length) {
+  if (!featuredStop) {
     return (
       <Pressable
         accessibilityRole="button"
@@ -270,57 +304,64 @@ function TimelinePreview({ trip, onPress }: { trip: Trip; onPress: () => void })
           <Ionicons name="map-outline" size={20} color={colors.primary} />
         </View>
         <View style={styles.grow}>
-          <Text style={styles.timelineCity}>No stops yet</Text>
-          <Text style={styles.timelineDates}>Add cities to preview this itinerary.</Text>
+          <Text style={styles.timelineEmptyTitle}>No stops yet</Text>
+          <Text style={styles.timelineEmptyBody}>Add cities to preview this itinerary.</Text>
         </View>
         <Ionicons name="chevron-forward" size={18} color={colors.gray400} />
       </Pressable>
     );
   }
 
+  const activities = featuredStop.activities ?? [];
+  const subtotal = calcStopSubtotal(featuredStop);
+  const dots = stops.slice(0, MAX_TIMELINE_STOPS);
+
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Open ${trip.title} itinerary`}
       onPress={onPress}
-      style={({ pressed }) => [styles.timelineCard, pressed && styles.pressedCard]}
+      style={({ pressed }) => [styles.timelinePreview, pressed && styles.pressedCard]}
     >
-      <View style={styles.timelineRail} />
-      {stops.map((stop, index) => {
-        const activities = stop.activities ?? [];
-        const subtotal = calcStopSubtotal(stop);
+      <View style={styles.timelineRailWrap}>
+        <View style={styles.timelineRail} />
+        {dots.map((stop, index) => (
+          <View
+            key={stop.id}
+            style={[
+              styles.timelineDot,
+              index === 1 && styles.timelineDotCoral,
+              index === 2 && styles.timelineDotAqua
+            ]}
+          />
+        ))}
+      </View>
 
-        return (
-          <View key={stop.id} style={[styles.timelineRow, index === stops.length - 1 && styles.timelineRowLast]}>
-            <View style={styles.timelineDot} />
-            <Image source={{ uri: getDestinationImage(stop.cityName) }} style={styles.timelineImage} />
-            <View style={styles.timelineText}>
-              <Text numberOfLines={1} style={styles.timelineCity}>{stop.cityName}</Text>
-              <Text numberOfLines={1} style={styles.timelineDates}>
-                {formatDateRange(stop.arrivalDate, stop.departDate)}
-              </Text>
-              <View style={styles.timelineActivityRow}>
-                <Text numberOfLines={1} style={styles.timelineActivityText}>
-                  {plural(activities.length, 'activity')}
-                </Text>
-                {activities.slice(0, 3).map((activity) => (
-                  <View key={activity.id} style={styles.timelineActivityIcon}>
-                    <Ionicons name={categoryIcon(activity.category)} size={10} color={colors.primary} />
-                  </View>
-                ))}
-              </View>
-            </View>
-            <Text numberOfLines={1} style={styles.timelineCost}>
-              {subtotal ? formatMoney(subtotal) : 'Open'}
-            </Text>
+      <ImageBackground
+        source={{ uri: getDestinationImage(featuredStop.cityName) }}
+        resizeMode="cover"
+        style={styles.timelineFeatureCard}
+      >
+        <LinearGradient
+          colors={['rgba(15,23,20,0.12)', 'rgba(15,23,20,0.72)']}
+          style={styles.timelineFeatureOverlay}
+        >
+          <Text numberOfLines={1} style={styles.timelineFeatureCity}>{featuredStop.cityName}</Text>
+          <Text numberOfLines={1} style={styles.timelineFeatureDates}>
+            {formatDateRange(featuredStop.arrivalDate, featuredStop.departDate)}
+          </Text>
+          <View style={styles.timelineFeatureMeta}>
+            <Text style={styles.timelineFeatureText}>{plural(activities.length, 'activity')}</Text>
+            {activities.slice(0, 2).map((activity) => (
+              <Ionicons key={activity.id} name={categoryIcon(activity.category)} size={17} color={colors.white} />
+            ))}
           </View>
-        );
-      })}
+          <Text style={styles.timelineFeatureCost}>{subtotal ? formatMoney(subtotal) : 'Plan costs'}</Text>
+        </LinearGradient>
+      </ImageBackground>
     </Pressable>
   );
 }
-
-type PlanningToolKey = 'new' | 'itinerary' | 'budget' | 'checklist';
 
 function PlanningTools({
   activeTrip,
@@ -329,11 +370,11 @@ function PlanningTools({
   activeTrip?: Trip;
   onPress: (tool: PlanningToolKey) => void;
 }) {
-  const tools: Array<{ key: PlanningToolKey; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
-    { key: 'new', label: 'New Trip', icon: 'add' },
-    { key: 'itinerary', label: 'Itinerary', icon: 'map-outline' },
-    { key: 'budget', label: 'Budget', icon: 'wallet-outline' },
-    { key: 'checklist', label: 'Checklist', icon: 'checkbox-outline' }
+  const tools: Array<{ key: PlanningToolKey; label: string; icon: keyof typeof Ionicons.glyphMap; color: string; surface: string }> = [
+    { key: 'new', label: 'New Trip', icon: 'add', color: colors.primary, surface: colors.primaryLight },
+    { key: 'itinerary', label: 'Itinerary', icon: 'map', color: colors.coral, surface: colors.coralSoft },
+    { key: 'budget', label: 'Budget', icon: 'wallet', color: colors.gold, surface: colors.goldSoft },
+    { key: 'checklist', label: 'Checklist', icon: 'checkmark-circle', color: colors.aqua, surface: colors.aquaSoft }
   ];
 
   return (
@@ -350,10 +391,10 @@ function PlanningTools({
           }
           key={tool.key}
           onPress={() => onPress(tool.key)}
-          style={({ pressed }) => [styles.toolTile, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.toolButton, pressed && styles.pressed]}
         >
-          <View style={[styles.toolIcon, tool.key === 'new' && styles.toolIconActive]}>
-            <Ionicons name={tool.icon} size={22} color={tool.key === 'new' ? colors.white : colors.primary} />
+          <View style={[styles.toolCircle, { backgroundColor: tool.surface }]}>
+            <Ionicons name={tool.icon} size={25} color={tool.color} />
           </View>
           <Text numberOfLines={1} style={styles.toolLabel}>{tool.label}</Text>
         </Pressable>
@@ -370,51 +411,30 @@ function PlaceCard({ place, trip, onPress }: { place: Stop; trip: Trip; onPress:
       onPress={onPress}
       style={({ pressed }) => [styles.placeCard, pressed && styles.pressed]}
     >
-      <Image source={{ uri: getDestinationImage(place.cityName) }} style={styles.placeImage} />
-      <View style={styles.placeCardCopy}>
-        <Text numberOfLines={1} style={styles.placeTitle}>{place.cityName}</Text>
-        <Text numberOfLines={1} style={styles.placeMeta}>
-          {place.country} · {trip.title}
-        </Text>
-      </View>
-      <View style={styles.placeArrow}>
-        <Ionicons name="arrow-forward" size={15} color={colors.primary} />
-      </View>
+      <ImageBackground source={{ uri: getDestinationImage(place.cityName) }} resizeMode="cover" style={styles.placeImage}>
+        <LinearGradient colors={['rgba(15,23,20,0.08)', 'rgba(15,23,20,0.62)']} style={styles.placeOverlay}>
+          <Text numberOfLines={1} style={styles.placeTitle}>{place.cityName}</Text>
+        </LinearGradient>
+      </ImageBackground>
     </Pressable>
   );
 }
 
 function DashboardSectionHeader({
-  actionLabel,
   onAction,
-  title,
-  titleSuffix
+  title
 }: {
-  actionLabel?: string;
   onAction?: () => void;
   title: string;
-  titleSuffix?: string;
 }) {
   return (
     <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>
-        {title}
-        {titleSuffix ? <Text style={styles.sectionTitleSuffix}> ({titleSuffix})</Text> : null}
-      </Text>
-      {actionLabel && onAction ? (
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {onAction ? (
         <Pressable accessibilityRole="button" onPress={onAction} hitSlop={8}>
-          <Text style={styles.viewAll}>{actionLabel}</Text>
+          <Ionicons name="arrow-forward" size={18} color={colors.primary} />
         </Pressable>
       ) : null}
-    </View>
-  );
-}
-
-function MetricChip({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
-  return (
-    <View style={styles.metricChip}>
-      <Ionicons name={icon} size={12} color={colors.white} />
-      <Text numberOfLines={1} style={styles.metricChipText}>{label}</Text>
     </View>
   );
 }
@@ -447,14 +467,54 @@ function plural(count: number, label: string) {
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: colors.background
+  },
+  scroll: {
+    flex: 1,
+    zIndex: 1
+  },
   screenContent: {
-    paddingTop: 8,
-    paddingBottom: 104
+    alignSelf: 'center',
+    maxWidth: layout.contentMaxWidth,
+    paddingHorizontal: CONTENT_PADDING,
+    position: 'relative',
+    width: '100%'
+  },
+  topEdgeFill: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0
+  },
+  bottomEdgeFill: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.background
+  },
+  heroPanel: {
+    borderRadius: 30,
+    backgroundColor: colors.heroBlue,
+    padding: 18,
+    paddingTop: 24,
+    paddingBottom: 18,
+    overflow: 'hidden',
+    ...shadows.card
+  },
+  bodySurface: {
+    marginHorizontal: -CONTENT_PADDING,
+    marginTop: 18,
+    paddingHorizontal: CONTENT_PADDING,
+    paddingTop: 1,
+    backgroundColor: colors.background
   },
   header: {
-    minHeight: 56,
+    minHeight: 74,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 12
   },
@@ -462,49 +522,58 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0
   },
-  greeting: {
-    color: colors.charcoal,
-    fontFamily: fontFamily.headingExtraBold,
-    fontSize: 24,
-    fontWeight: typography.weight.extrabold,
-    lineHeight: 30
-  },
-  subtitle: {
-    color: colors.textMuted,
-    fontFamily: fontFamily.body,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 1
-  },
-  avatarButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  greetingRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border
+    gap: 8
   },
-  avatarImage: {
+  greeting: {
+    color: colors.white,
+    flexShrink: 1,
+    fontFamily: fontFamily.headingExtraBold,
+    fontSize: 29,
+    fontWeight: typography.weight.extrabold,
+    lineHeight: 35
+  },
+  waveIcon: {
     width: 38,
     height: 38,
     borderRadius: 19
   },
-  avatarInitial: {
-    color: colors.charcoal,
-    fontFamily: fontFamily.headingBold,
+  subtitle: {
+    color: 'rgba(255,255,255,0.74)',
+    fontFamily: fontFamily.bodyMedium,
     fontSize: 16,
-    lineHeight: 20
+    lineHeight: 21,
+    marginTop: 1
+  },
+  avatarButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.38)'
+  },
+  avatarImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 28
+  },
+  avatarInitial: {
+    color: colors.white,
+    fontFamily: fontFamily.headingBold,
+    fontSize: 24,
+    lineHeight: 30
   },
   nextCard: {
-    height: 204,
-    marginTop: 18,
-    borderRadius: radius.card,
+    height: 214,
+    marginTop: 8,
+    borderRadius: 22,
     overflow: 'hidden',
     backgroundColor: colors.gray100,
-    borderWidth: 1,
-    borderColor: colors.border,
     ...shadows.card
   },
   nextCardImage: {
@@ -512,122 +581,83 @@ const styles = StyleSheet.create({
   },
   nextOverlay: {
     flex: 1,
-    padding: 16
-  },
-  nextTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    padding: 17,
     justifyContent: 'flex-end'
   },
-  nextBadge: {
-    minHeight: 24,
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.frostedDark
-  },
-  nextBadgeText: {
-    color: colors.white,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: 11,
-    lineHeight: 14
-  },
-  nextAction: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.frostedWhite
-  },
   nextCopy: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 70,
-    gap: 6
+    marginBottom: 62
   },
   nextTitle: {
     color: colors.white,
     fontFamily: fontFamily.headingExtraBold,
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: typography.weight.extrabold,
-    lineHeight: 30,
-    textShadowColor: 'rgba(0,0,0,0.22)',
+    lineHeight: 34,
+    textShadowColor: 'rgba(0,0,0,0.28)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 5
   },
-  nextMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5
-  },
   nextMeta: {
-    color: 'rgba(255,255,255,0.88)',
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: 12,
-    lineHeight: 16
-  },
-  nextChipRow: {
-    flexDirection: 'row',
-    gap: 6
-  },
-  metricChip: {
-    flexShrink: 1,
-    maxWidth: 150,
-    minHeight: 25,
-    borderRadius: radius.pill,
-    paddingHorizontal: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.24)'
-  },
-  metricChipText: {
-    color: colors.white,
-    flexShrink: 1,
+    color: 'rgba(255,255,255,0.9)',
     fontFamily: fontFamily.bodyMedium,
-    fontSize: 11,
-    lineHeight: 14
+    fontSize: 15,
+    lineHeight: 20,
+    marginTop: 2
+  },
+  nextMetricRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 15,
+    maxWidth: 236
+  },
+  metricColumn: {
+    minWidth: 58
+  },
+  metricValue: {
+    color: colors.white,
+    fontFamily: fontFamily.headingExtraBold,
+    fontSize: 20,
+    lineHeight: 24
+  },
+  metricLabel: {
+    color: 'rgba(255,255,255,0.88)',
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 13,
+    lineHeight: 16
   },
   continuePill: {
     position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 16,
-    height: 46,
-    borderRadius: 23,
-    paddingHorizontal: 18,
+    left: 18,
+    right: 18,
+    bottom: 15,
+    height: 48,
+    borderRadius: 24,
+    paddingHorizontal: 22,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.frostedWhite
-  },
-  continueText: {
-    color: colors.charcoal,
-    fontFamily: fontFamily.headingBold,
-    fontSize: 15,
-    lineHeight: 20
-  },
-  emptyJourneyCard: {
-    minHeight: 166,
-    marginTop: 14,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    padding: 16,
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+    gap: 14,
+    backgroundColor: colors.white,
     ...shadows.subtle
   },
+  continueText: {
+    color: colors.heroBlue,
+    fontFamily: fontFamily.headingExtraBold,
+    fontSize: 16,
+    lineHeight: 21
+  },
+  emptyJourneyCard: {
+    minHeight: 190,
+    marginTop: 6,
+    borderRadius: 20,
+    backgroundColor: colors.frostedWhite,
+    padding: 16,
+    justifyContent: 'space-between'
+  },
   emptyIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.primaryLight
@@ -638,8 +668,8 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: colors.charcoal,
     fontFamily: fontFamily.headingExtraBold,
-    fontSize: 21,
-    lineHeight: 26
+    fontSize: 22,
+    lineHeight: 27
   },
   emptyBody: {
     color: colors.textMuted,
@@ -648,8 +678,8 @@ const styles = StyleSheet.create({
     lineHeight: 18
   },
   emptyAction: {
-    height: 38,
-    borderRadius: 19,
+    height: 40,
+    borderRadius: 20,
     paddingHorizontal: 14,
     alignSelf: 'flex-start',
     flexDirection: 'row',
@@ -664,11 +694,11 @@ const styles = StyleSheet.create({
     lineHeight: 17
   },
   section: {
-    marginTop: 18,
-    gap: 10
+    marginTop: 26,
+    gap: 12
   },
   sectionHeader: {
-    minHeight: 22,
+    minHeight: 28,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -677,111 +707,122 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: colors.charcoal,
     flex: 1,
-    fontFamily: fontFamily.headingBold,
-    fontSize: 16,
-    lineHeight: 22
+    fontFamily: fontFamily.headingExtraBold,
+    fontSize: 19,
+    lineHeight: 25
   },
-  sectionTitleSuffix: {
-    color: colors.textMuted,
+  toolRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8
+  },
+  toolButton: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 96
+  },
+  toolCircle: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.white,
+    ...shadows.subtle
+  },
+  toolLabel: {
+    color: colors.charcoal,
     fontFamily: fontFamily.bodyMedium,
-    fontSize: 13,
-    lineHeight: 18
+    fontSize: 12,
+    lineHeight: 15,
+    textAlign: 'center'
   },
-  viewAll: {
-    color: colors.primary,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: 13,
-    lineHeight: 18
-  },
-  timelineCard: {
-    minHeight: 188,
-    position: 'relative',
-    borderRadius: radius.card,
+  timelinePreview: {
+    minHeight: 174,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    padding: 12,
     ...shadows.subtle
+  },
+  timelineRailWrap: {
+    width: 34,
+    height: 140,
+    alignItems: 'center',
+    justifyContent: 'space-around'
   },
   timelineRail: {
     position: 'absolute',
-    left: 22,
-    top: 28,
-    bottom: 28,
+    top: 9,
+    bottom: 9,
     width: 2,
-    borderRadius: 1,
-    backgroundColor: colors.primaryLight
-  },
-  timelineRow: {
-    height: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.gray100
-  },
-  timelineRowLast: {
-    borderBottomWidth: 0
+    borderRadius: 2,
+    backgroundColor: colors.gray200
   },
   timelineDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginLeft: 6,
+    width: 13,
+    height: 13,
+    borderRadius: 6.5,
     backgroundColor: colors.primary,
     borderWidth: 2,
     borderColor: colors.surface
   },
-  timelineImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.primaryLight
+  timelineDotCoral: {
+    backgroundColor: colors.coral
   },
-  timelineText: {
+  timelineDotAqua: {
+    backgroundColor: colors.aqua
+  },
+  timelineFeatureCard: {
     flex: 1,
-    minWidth: 0,
-    gap: 1
+    height: 150,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: colors.gray100,
+    ...shadows.card
   },
-  timelineCity: {
-    color: colors.charcoal,
-    fontFamily: fontFamily.headingBold,
+  timelineFeatureOverlay: {
+    flex: 1,
+    padding: 16,
+    justifyContent: 'flex-end'
+  },
+  timelineFeatureCity: {
+    color: colors.white,
+    fontFamily: fontFamily.headingExtraBold,
+    fontSize: 23,
+    lineHeight: 29
+  },
+  timelineFeatureDates: {
+    color: 'rgba(255,255,255,0.9)',
+    fontFamily: fontFamily.bodyMedium,
     fontSize: 14,
-    lineHeight: 18
+    lineHeight: 19,
+    marginTop: 2
   },
-  timelineDates: {
-    color: colors.textMuted,
-    fontFamily: fontFamily.body,
-    fontSize: 11,
-    lineHeight: 15
-  },
-  timelineActivityRow: {
+  timelineFeatureMeta: {
+    marginTop: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4
+    gap: 10
   },
-  timelineActivityText: {
-    color: colors.textMuted,
-    fontFamily: fontFamily.body,
-    fontSize: 11,
-    lineHeight: 15
+  timelineFeatureText: {
+    color: colors.white,
+    fontFamily: fontFamily.headingBold,
+    fontSize: 14,
+    lineHeight: 19
   },
-  timelineActivityIcon: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primaryLight
-  },
-  timelineCost: {
-    width: 58,
-    color: colors.charcoal,
+  timelineFeatureCost: {
+    color: colors.white,
     fontFamily: fontFamily.bodyMedium,
-    fontSize: 12,
-    lineHeight: 16,
-    textAlign: 'right'
+    fontSize: 14,
+    lineHeight: 19,
+    marginTop: 4
   },
   timelineEmpty: {
     minHeight: 84,
@@ -803,91 +844,64 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.primaryLight
   },
-  toolRow: {
-    flexDirection: 'row',
-    gap: TOOL_GAP
-  },
-  toolTile: {
-    flex: 1,
-    height: 72,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6
-  },
-  toolIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primaryLight
-  },
-  toolIconActive: {
-    backgroundColor: colors.primary
-  },
-  toolLabel: {
-    color: colors.charcoal,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: 11,
-    lineHeight: 14
-  },
-  horizontalList: {
-    gap: 12,
-    paddingRight: CONTENT_PADDING
-  },
-  recentCard: {
-    height: 132
-  },
-  placeCardWrap: {
-    height: 148
-  },
-  placeCard: {
-    flex: 1,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    padding: 8,
-    position: 'relative',
-    ...shadows.subtle
-  },
-  placeImage: {
-    width: '100%',
-    height: 78,
-    borderRadius: radius.md,
-    backgroundColor: colors.primaryLight
-  },
-  placeCardCopy: {
-    marginTop: 8,
-    paddingRight: 30,
-    gap: 1
-  },
-  placeTitle: {
+  timelineEmptyTitle: {
     color: colors.charcoal,
     fontFamily: fontFamily.headingBold,
     fontSize: 14,
     lineHeight: 18
   },
-  placeMeta: {
+  timelineEmptyBody: {
     color: colors.textMuted,
     fontFamily: fontFamily.body,
     fontSize: 12,
-    lineHeight: 16
+    lineHeight: 16,
+    marginTop: 1
   },
-  placeArrow: {
-    position: 'absolute',
-    right: 8,
-    bottom: 10,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+  horizontalList: {
+    gap: 14,
+    paddingRight: CONTENT_PADDING
+  },
+  placeCardWrap: {
+    height: 124
+  },
+  placeCard: {
+    flex: 1,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: colors.gray100,
+    ...shadows.subtle
+  },
+  placeImage: {
+    flex: 1
+  },
+  placeOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    padding: 12
+  },
+  placeTitle: {
+    color: colors.white,
+    fontFamily: fontFamily.headingBold,
+    fontSize: 15,
+    lineHeight: 19
+  },
+  placesEmpty: {
+    minHeight: 72,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primaryLight
+    gap: 10
+  },
+  placesEmptyText: {
+    color: colors.textMuted,
+    flex: 1,
+    fontFamily: fontFamily.body,
+    fontSize: 13,
+    lineHeight: 18
   },
   grow: {
     flex: 1,
