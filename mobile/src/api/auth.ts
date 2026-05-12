@@ -17,7 +17,7 @@ export const authApi = {
     const { data } = await client.post<AuthResponse>('/api/auth/register', payload);
     return data;
   },
-  login: async (payload: { email: string; password: string }) => {
+  login: async (payload: { identifier: string; password: string }) => {
     const { data } = await client.post<AuthResponse>('/api/auth/login', payload);
     return data;
   },

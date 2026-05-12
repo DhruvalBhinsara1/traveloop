@@ -43,7 +43,7 @@ export const parseOptionalMoney = (value: string) => {
 
 export const validateLogin = (payload: LoginPayload) => {
   const errors: ValidationErrors<keyof LoginPayload> = {};
-  if (!validateEmail(payload.email.trim())) errors.email = 'Enter a valid email address.';
+  if (!payload.identifier.trim()) errors.identifier = 'Enter your email or username.';
   if (!payload.password) errors.password = 'Password is required.';
   return errors;
 };

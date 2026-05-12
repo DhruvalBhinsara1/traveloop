@@ -9,30 +9,32 @@ import { InputField } from '../../components/InputField';
 import { colors, typography } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { photos } from '../../utils/photos';
-import { validateEmail } from '../../utils/validation';
 import { AuthStackParamList } from '../../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
 export function LoginScreen({ navigation }: Props) {
   const { signIn } = useAuth();
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
-    if (!validateEmail(email)) {
-      setError('Enter a valid email');
+    const trimmedIdentifier = identifier.trim();
+
+    if (!trimmedIdentifier) {
+      setError('Enter your email or username');
       return;
     }
+
     if (password.length < 8) {
       setError('Password must be at least 8 characters');
       return;
     }
     setLoading(true);
     try {
-      await signIn(email.trim(), password);
+      await signIn(trimmedIdentifier, password);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -49,7 +51,16 @@ export function LoginScreen({ navigation }: Props) {
             <Text style={styles.display}>Journeys Made Simple</Text>
           </View>
           <View style={styles.sheet}>
-            <InputField label="Email" value={email} onChangeText={setEmail} placeholder="riya@email.com" keyboardType="email-address" />
+            <InputField
+              label="Email or username"
+              value={identifier}
+              onChangeText={setIdentifier}
+              placeholder="riya@email.com or riya_travels"
+              keyboardType="email-address"
+              textContentType="username"
+              autoComplete="username"
+              autoCorrect={false}
+            />
             <InputField label="Password" value={password} onChangeText={setPassword} placeholder="8+ characters" secureTextEntry />
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <Button label="Login" onPress={submit} loading={loading} icon="log-in-outline" />

@@ -4,29 +4,60 @@ export const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 
 export const normalizeUsername = (username) => String(username ?? '').trim().toLowerCase();
 
+export const isValidUsername = (username) => /^[a-z0-9_]{3,24}$/.test(normalizeUsername(username));
+
 export const validateUsername = (username) => {
   const normalized = normalizeUsername(username);
 
-  if (!/^[a-z0-9_]{3,24}$/.test(normalized)) {
+  if (!isValidUsername(normalized)) {
     throw new HttpError(400, 'Username must be 3-24 characters using letters, numbers, or underscores');
   }
 
   return normalized;
 };
 
-export const validateAuth = ({ name, username, email, password }, mode = 'register') => {
+export const validateLoginIdentifier = (identifier) => {
+  const normalized = String(identifier ?? '').trim().toLowerCase();
+
+  if (!normalized) {
+    throw new HttpError(400, 'Email or username is required');
+  }
+
+  if (normalized.includes('@')) {
+    if (!validateEmail(normalized)) {
+      throw new HttpError(400, 'Enter a valid email or username');
+    }
+    return { type: 'email', value: normalized };
+  }
+
+  if (!isValidUsername(normalized)) {
+    throw new HttpError(400, 'Enter a valid email or username');
+  }
+
+  return { type: 'username', value: normalized };
+};
+
+export const validateAuth = ({ name, username, email, identifier, password }, mode = 'register') => {
+  if (mode === 'login') {
+    requireFields({ identifier, password }, ['identifier', 'password']);
+    validateLoginIdentifier(identifier);
+
+    if (String(password).length < 8) {
+      throw new HttpError(400, 'Password must be at least 8 characters');
+    }
+    return;
+  }
+
   requireFields(
-    { email, password, ...(mode === 'register' ? { name, username } : {}) },
-    mode === 'register' ? ['name', 'username', 'email', 'password'] : ['email', 'password']
+    { email, password, name, username },
+    ['name', 'username', 'email', 'password']
   );
 
   if (!validateEmail(email)) {
     throw new HttpError(400, 'Email must be valid');
   }
 
-  if (mode === 'register') {
-    validateUsername(username);
-  }
+  validateUsername(username);
 
   if (String(password).length < 8) {
     throw new HttpError(400, 'Password must be at least 8 characters');

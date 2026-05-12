@@ -14,7 +14,7 @@ type AvatarUpload = {
 type AuthContextValue = {
   user: User | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (identifier: string, password: string) => Promise<void>;
   signUp: (name: string, username: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   updateProfile: (payload: { name: string; username: string }) => Promise<User>;
@@ -54,8 +54,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       loading,
-      signIn: async (email, password) => {
-        const response = await authApi.login({ email, password });
+      signIn: async (identifier, password) => {
+        const response = await authApi.login({ identifier, password });
         await AsyncStorage.setItem(AUTH_TOKEN_KEY, response.token);
         setUser(response.user);
       },

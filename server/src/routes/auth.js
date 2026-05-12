@@ -6,7 +6,7 @@ import { requireAuth, signToken } from '../middleware/auth.js';
 import { prisma } from '../prisma.js';
 import { uploadAvatar } from '../utils/cloudStorage.js';
 import { asyncHandler, HttpError, sanitizeUser } from '../utils/http.js';
-import { normalizeUsername, validateAuth, validateUsername } from '../utils/validators.js';
+import { normalizeUsername, validateAuth, validateLoginIdentifier, validateUsername } from '../utils/validators.js';
 
 export const authRouter = Router();
 
@@ -55,12 +55,16 @@ authRouter.post('/register', asyncHandler(async (req, res) => {
 }));
 
 authRouter.post('/login', asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
-  validateAuth({ email, password }, 'login');
+  const identifier = String(req.body.identifier ?? req.body.email ?? '').trim();
+  const { password } = req.body;
+  validateAuth({ identifier, password }, 'login');
 
-  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } });
+  const loginIdentifier = validateLoginIdentifier(identifier);
+  const user = await prisma.user.findUnique({
+    where: { [loginIdentifier.type]: loginIdentifier.value }
+  });
   if (!user || !(await bcrypt.compare(password, user.password))) {
-    throw new HttpError(401, 'Invalid email or password');
+    throw new HttpError(401, 'Invalid email, username, or password');
   }
 
   res.json({ token: signToken(user), user: sanitizeUser(user) });

@@ -203,7 +203,7 @@ export type ActivityInput = {
 };
 
 export type LoginPayload = {
-  email: string;
+  identifier: string;
   password: string;
 };
 
