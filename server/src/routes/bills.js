@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { prisma } from '../prisma.js';
 import { asyncHandler, HttpError, publicUserSelect, toInt } from '../utils/http.js';
+import { parseOptionalNumber } from '../utils/validators.js';
 import { getAccessibleTrip } from './trips.js';
 
 export const billsRouter = Router();
@@ -86,9 +87,26 @@ const buildSummary = (participants, expenses) => {
   };
 };
 
-const serializeSplit = (trip) => {
-  const participants = trip.billParticipants;
-  const expenses = trip.billExpenses;
+export const getActiveTripUserIds = (trip) => {
+  const activeUserIds = new Set();
+  if (trip.userId) activeUserIds.add(trip.userId);
+  if (trip.user?.id) activeUserIds.add(trip.user.id);
+  trip.members?.forEach((member) => activeUserIds.add(member.userId));
+  trip.group?.members?.forEach((member) => activeUserIds.add(member.userId));
+  return activeUserIds;
+};
+
+const serializeParticipant = (participant, activeUserIds) => ({
+  ...participant,
+  canRemove: !participant.userId || !activeUserIds.has(participant.userId)
+});
+
+export const serializeSplit = (trip, activeUserIds = getActiveTripUserIds(trip)) => {
+  const participants = trip.billParticipants.map((participant) => serializeParticipant(participant, activeUserIds));
+  const expenses = trip.billExpenses.map((expense) => ({
+    ...expense,
+    paidBy: expense.paidBy ? serializeParticipant(expense.paidBy, activeUserIds) : expense.paidBy
+  }));
 
   return {
     participants,
@@ -157,13 +175,13 @@ const getOwnedExpense = async (id, userId) => {
 };
 
 const getOwnedSplit = async (tripId, userId) => {
-  await getAccessibleTrip(tripId, userId);
+  const accessibleTrip = await getAccessibleTrip(tripId, userId);
   const trip = await prisma.trip.findUnique({
     where: { id: tripId },
     include: splitInclude
   });
 
-  return serializeSplit(trip);
+  return serializeSplit(trip, getActiveTripUserIds(accessibleTrip));
 };
 
 const getAccessibleSplit = async (tripId, userId) => {
@@ -174,7 +192,7 @@ const getAccessibleSplit = async (tripId, userId) => {
     include: splitInclude
   });
 
-  return serializeSplit(trip);
+  return serializeSplit(trip, getActiveTripUserIds(accessibleTrip));
 };
 
 billsRouter.get('/trips/:tripId/splits', asyncHandler(async (req, res) => {
@@ -205,7 +223,9 @@ billsRouter.post('/trips/:tripId/splits/participants', asyncHandler(async (req, 
 
 billsRouter.delete('/splits/participants/:id', asyncHandler(async (req, res) => {
   const participant = await getOwnedParticipant(toInt(req.params.id), req.user.id);
-  if (participant.userId) {
+  const trip = await getAccessibleTrip(participant.tripId, req.user.id);
+  const activeUserIds = getActiveTripUserIds(trip);
+  if (participant.userId && activeUserIds.has(participant.userId)) {
     throw new HttpError(400, 'Trip members cannot be removed from split participants');
   }
   await prisma.billParticipant.delete({ where: { id: participant.id } });
@@ -215,7 +235,7 @@ billsRouter.delete('/splits/participants/:id', asyncHandler(async (req, res) => 
 billsRouter.post('/trips/:tripId/splits/expenses', asyncHandler(async (req, res) => {
   const trip = await getAccessibleTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
   const title = String(req.body.title ?? '').trim();
-  const amount = Number(req.body.amount);
+  const amount = parseOptionalNumber(req.body.amount, 'Expense amount');
   const paidById = toInt(req.body.paidById, 'paidById');
 
   if (!title) {
@@ -226,7 +246,7 @@ billsRouter.post('/trips/:tripId/splits/expenses', asyncHandler(async (req, res)
     throw new HttpError(400, 'Expense title must be 60 characters or fewer');
   }
 
-  if (!Number.isFinite(amount) || amount <= 0) {
+  if (amount <= 0) {
     throw new HttpError(400, 'Expense amount must be greater than 0');
   }
 

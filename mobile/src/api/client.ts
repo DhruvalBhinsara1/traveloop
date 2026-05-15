@@ -1,12 +1,11 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+
+import { getAuthToken } from './tokenStorage';
+export { AUTH_TOKEN_KEY, LEGACY_AUTH_TOKEN_KEY } from './tokenStorage';
 
 declare const process: {
   env: Record<string, string | undefined>;
 };
-
-export const AUTH_TOKEN_KEY = 'traveloop.token';
-export const LEGACY_AUTH_TOKEN_KEY = 'token';
 
 export const getApiBaseUrl = () => (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000').replace(/\/$/, '');
 
@@ -18,7 +17,7 @@ export const client = axios.create({
 });
 
 client.interceptors.request.use(async (config) => {
-  const token = (await AsyncStorage.getItem(AUTH_TOKEN_KEY)) ?? (await AsyncStorage.getItem(LEGACY_AUTH_TOKEN_KEY));
+  const token = await getAuthToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }

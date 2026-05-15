@@ -3,7 +3,7 @@ import multer from 'multer';
 import { v4 as uuid } from 'uuid';
 
 import { prisma } from '../prisma.js';
-import { uploadTripCover } from '../utils/cloudStorage.js';
+import { isAllowedImageMimeType, uploadTripCover } from '../utils/cloudStorage.js';
 import { asyncHandler, HttpError, publicUserSelect, toInt } from '../utils/http.js';
 import { ensureFriends } from '../utils/social.js';
 import { validateTrip } from '../utils/validators.js';
@@ -14,8 +14,8 @@ const coverUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: Number(process.env.MAX_COVER_UPLOAD_BYTES ?? 6_000_000) },
   fileFilter: (_req, file, callback) => {
-    if (!file.mimetype.startsWith('image/')) {
-      callback(new HttpError(400, 'Trip cover must be an image'));
+    if (!isAllowedImageMimeType(file.mimetype)) {
+      callback(new HttpError(400, 'Trip cover must be a JPEG, PNG, or WebP image'));
       return;
     }
 
@@ -124,7 +124,7 @@ tripsRouter.get('/', asyncHandler(async (req, res) => {
 
 tripsRouter.post('/', asyncHandler(async (req, res) => {
   const { title, description, startDate, endDate, budget, coverImage } = req.body;
-  const { start, end } = validateTrip(req.body);
+  const { start, end, budget: parsedBudget } = validateTrip(req.body);
   const isPublic = req.body.isPublic === true || req.body.isPublic === 'true';
   const memberIds = normalizeMemberIds(req.body.memberIds, req.user.id);
   const groupId = req.body.groupId ? toInt(req.body.groupId, 'groupId') : null;
@@ -142,7 +142,7 @@ tripsRouter.post('/', asyncHandler(async (req, res) => {
       title: title.trim(),
       description: description?.trim() || null,
       coverImage: coverImage?.trim() || null,
-      budget: budget === undefined || budget === null || budget === '' ? null : Number(budget),
+      budget: parsedBudget,
       startDate: start,
       endDate: end,
       isPublic,
@@ -182,7 +182,7 @@ tripsRouter.put('/:id', asyncHandler(async (req, res) => {
   const existing = await getOwnedTrip(id, req.user.id);
 
   const { title, description, startDate, endDate, budget, coverImage } = req.body;
-  const { start, end } = validateTrip(req.body);
+  const { start, end, budget: parsedBudget } = validateTrip(req.body);
   const nextIsPublic =
     req.body.isPublic === undefined
       ? undefined
@@ -194,7 +194,7 @@ tripsRouter.put('/:id', asyncHandler(async (req, res) => {
       title: title.trim(),
       description: description?.trim() || null,
       coverImage: coverImage?.trim() || null,
-      budget: budget === undefined || budget === null || budget === '' ? null : Number(budget),
+      budget: parsedBudget,
       startDate: start,
       endDate: end,
       ...(nextIsPublic === undefined

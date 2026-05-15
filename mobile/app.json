@@ -35,7 +35,8 @@
           "cameraPermission": "Traveloop uses your camera to take profile photos and trip thumbnails.",
           "microphonePermission": false
         }
-      ]
+      ],
+      "expo-secure-store"
     ]
   }
 }

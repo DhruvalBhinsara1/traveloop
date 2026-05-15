@@ -14,8 +14,12 @@ export const asyncHandler = (handler) => async (req, res, next) => {
 };
 
 export const toInt = (value, name = 'id') => {
-  const parsed = Number.parseInt(value, 10);
-  if (Number.isNaN(parsed)) {
+  if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) {
+    throw new HttpError(400, `Invalid ${name}`);
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) {
     throw new HttpError(400, `Invalid ${name}`);
   }
   return parsed;

@@ -1,14 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { Activity, ChecklistItem, Stop } from '../api/types';
+import { Activity, ChecklistItem, PublicTripActivity, Stop } from '../api/types';
 import { colors, shadows, typography } from '../theme';
 import { formatDateRange, nightsBetween } from '../utils/dateHelpers';
 import { IconButton } from './Button';
 import { ProgressBar } from './ProgressBar';
 import { categoryIcon } from './photoUtils';
 
-export function ActivityItem({ activity }: { activity: Activity }) {
+type ActivityDisplay = Pick<Activity, 'name' | 'category' | 'cost'> | PublicTripActivity;
+
+export function ActivityItem({ activity }: { activity: ActivityDisplay }) {
   return (
     <View style={styles.activity}>
       <View style={styles.activityIcon}>

@@ -104,6 +104,10 @@ DATABASE_URL="postgresql://user:password@localhost:5432/traveloop"
 JWT_SECRET="replace-with-a-long-local-secret"
 PORT=3000
 NODE_ENV=development
+CORS_ORIGINS="http://localhost:8081,http://127.0.0.1:8081"
+RATE_LIMIT_WINDOW_MS=900000
+API_RATE_LIMIT_MAX=300
+AUTH_RATE_LIMIT_MAX=20
 
 CLOUDINARY_CLOUD_NAME=""
 CLOUDINARY_API_KEY=""
@@ -121,6 +125,8 @@ openssl rand -base64 48
 ```
 
 Cloudinary values are only needed for photo uploads. Keep them on the server side. The mobile app should never contain Cloudinary secrets.
+
+Browser origins must be listed in `CORS_ORIGINS`; native/mobile requests without an `Origin` header are allowed. Rate limit values default to a 15-minute window, 300 general API requests, and 20 auth requests.
 
 ### Mobile
 
@@ -220,6 +226,7 @@ npm run dev
 npm run dev:server
 npm run dev:mobile
 npm run check
+npm run test
 ```
 
 Server:
@@ -228,6 +235,7 @@ Server:
 npm --prefix server run dev
 npm --prefix server run start
 npm --prefix server run check
+npm --prefix server run test
 npm --prefix server run prisma:generate
 npm --prefix server run prisma:migrate
 npm --prefix server run prisma:deploy
@@ -255,8 +263,11 @@ GET  /
 GET  /health
 POST /api/auth/register
 POST /api/auth/login
+GET  /api/public/:shareToken
 GET  /api/public/trips/:shareToken
 ```
+
+Public trip responses are intentionally sanitized for sharing and do not include notes, checklist items, crew/group data, IDs, or share tokens. Mobile share links use the app deep link format `traveloop://public/:shareToken`.
 
 Registration requires `name`, `username`, `email`, and `password`. Usernames are normalized lowercase and can contain letters, numbers, and underscores.
 
@@ -360,6 +371,10 @@ NODE_ENV=production
 CLOUDINARY_CLOUD_NAME=
 CLOUDINARY_API_KEY=
 CLOUDINARY_API_SECRET=
+CORS_ORIGINS=
+RATE_LIMIT_WINDOW_MS=900000
+API_RATE_LIMIT_MAX=300
+AUTH_RATE_LIMIT_MAX=20
 CLOUDINARY_FOLDER=traveloop/trip-covers
 CLOUDINARY_AVATAR_FOLDER=traveloop/avatars
 MAX_COVER_UPLOAD_BYTES=4000000

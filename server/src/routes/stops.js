@@ -31,8 +31,8 @@ const getOwnedStop = async (stopId, userId) => {
 
 stopsRouter.post('/trips/:tripId/stops', asyncHandler(async (req, res) => {
   const trip = await getAccessibleTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
-  const { cityName, country, arrivalDate, departDate, order } = req.body;
-  const { arrival, depart } = validateStop(req.body, trip);
+  const { cityName, country } = req.body;
+  const { arrival, depart, order } = validateStop(req.body, trip);
   const nextOrder = order ?? trip.stops.length + 1;
 
   const stop = await prisma.stop.create({
@@ -52,8 +52,8 @@ stopsRouter.post('/trips/:tripId/stops', asyncHandler(async (req, res) => {
 
 stopsRouter.put('/stops/:id', asyncHandler(async (req, res) => {
   const stop = await getOwnedStop(toInt(req.params.id), req.user.id);
-  const { cityName, country, arrivalDate, departDate, order } = req.body;
-  const { arrival, depart } = validateStop(req.body, stop.trip);
+  const { cityName, country } = req.body;
+  const { arrival, depart, order } = validateStop(req.body, stop.trip);
 
   const updated = await prisma.stop.update({
     where: { id: stop.id },
@@ -62,7 +62,7 @@ stopsRouter.put('/stops/:id', asyncHandler(async (req, res) => {
       country: country.trim(),
       arrivalDate: arrival,
       departDate: depart,
-      order: order === undefined ? stop.order : Number(order)
+      order: order === undefined ? stop.order : order
     },
     include: { activities: true }
   });
@@ -81,7 +81,7 @@ stopsRouter.patch('/trips/:tripId/stops/reorder', asyncHandler(async (req, res) 
   const orderedIds = Array.isArray(req.body.orderedIds) ? req.body.orderedIds.map(Number) : [];
   const currentIds = trip.stops.map((stop) => stop.id);
 
-  if (orderedIds.length !== currentIds.length || orderedIds.some((id) => !currentIds.includes(id))) {
+  if (orderedIds.length !== currentIds.length || orderedIds.some((id) => !Number.isInteger(id) || !currentIds.includes(id))) {
     throw new HttpError(400, 'orderedIds must contain every stop in this trip');
   }
 

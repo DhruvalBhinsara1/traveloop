@@ -37,6 +37,31 @@ export const validateLoginIdentifier = (identifier) => {
   return { type: 'username', value: normalized };
 };
 
+export const parseOptionalNumber = (
+  value,
+  field,
+  { defaultValue = null, min = undefined, integer = false } = {}
+) => {
+  if (value === undefined || value === null || value === '' || (typeof value === 'string' && !value.trim())) {
+    return defaultValue;
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    throw new HttpError(400, `${field} must be a valid number`);
+  }
+
+  if (integer && !Number.isInteger(numeric)) {
+    throw new HttpError(400, `${field} must be a whole number`);
+  }
+
+  if (min !== undefined && numeric < min) {
+    throw new HttpError(400, `${field} must be ${min === 0 ? 'non-negative' : `at least ${min}`}`);
+  }
+
+  return numeric;
+};
+
 export const validateAuth = ({ name, username, email, identifier, password }, mode = 'register') => {
   if (mode === 'login') {
     requireFields({ identifier, password }, ['identifier', 'password']);
@@ -78,14 +103,12 @@ export const validateTrip = ({ title, startDate, endDate, budget }) => {
     throw new HttpError(400, 'Trip start date must be before or equal to end date');
   }
 
-  if (budget !== undefined && budget !== null && Number(budget) < 0) {
-    throw new HttpError(400, 'Budget must be non-negative');
-  }
+  const parsedBudget = parseOptionalNumber(budget, 'Budget', { min: 0 });
 
-  return { start, end };
+  return { start, end, budget: parsedBudget };
 };
 
-export const validateStop = ({ cityName, country, arrivalDate, departDate }, trip) => {
+export const validateStop = ({ cityName, country, arrivalDate, departDate, order }, trip) => {
   requireFields({ cityName, country, arrivalDate, departDate }, ['cityName', 'country', 'arrivalDate', 'departDate']);
   const arrival = parseDate(arrivalDate, 'arrivalDate');
   const depart = parseDate(departDate, 'departDate');
@@ -98,15 +121,27 @@ export const validateStop = ({ cityName, country, arrivalDate, departDate }, tri
     throw new HttpError(400, 'Stop dates must fit within the trip date range');
   }
 
-  return { arrival, depart };
+  const parsedOrder = parseOptionalNumber(order, 'Stop order', { defaultValue: undefined, min: 0, integer: true });
+
+  return { arrival, depart, order: parsedOrder };
 };
 
 export const validateActivity = ({ name, category, cost }) => {
   requireFields({ name, category }, ['name', 'category']);
 
-  if (cost !== undefined && cost !== null && Number(cost) < 0) {
-    throw new HttpError(400, 'Activity cost must be non-negative');
-  }
+  const parsedCost = parseOptionalNumber(cost, 'Activity cost', { defaultValue: 0, min: 0 });
+
+  return { cost: parsedCost };
+};
+
+export const validateActivityDuration = (duration) => {
+  const parsedDuration = parseOptionalNumber(duration, 'Activity duration', {
+    defaultValue: null,
+    min: 0,
+    integer: true
+  });
+
+  return parsedDuration;
 };
 
 export const validateChecklistItem = ({ label, category }) => {

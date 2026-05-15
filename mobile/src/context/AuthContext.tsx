@@ -1,8 +1,7 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
 
 import { authApi } from '../api/auth';
-import { AUTH_TOKEN_KEY, LEGACY_AUTH_TOKEN_KEY } from '../api/client';
+import { clearAuthToken, getAuthToken, setAuthToken } from '../api/tokenStorage';
 import { User } from '../api/types';
 
 type AvatarUpload = {
@@ -32,13 +31,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const restore = async () => {
       try {
-        const token = (await AsyncStorage.getItem(AUTH_TOKEN_KEY)) ?? (await AsyncStorage.getItem(LEGACY_AUTH_TOKEN_KEY));
+        const token = await getAuthToken();
         if (token) {
           const profile = await authApi.me();
           if (mounted) setUser(profile);
         }
       } catch {
-        await AsyncStorage.multiRemove([AUTH_TOKEN_KEY, LEGACY_AUTH_TOKEN_KEY]);
+        await clearAuthToken();
       } finally {
         if (mounted) setLoading(false);
       }
@@ -56,16 +55,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       signIn: async (identifier, password) => {
         const response = await authApi.login({ identifier, password });
-        await AsyncStorage.setItem(AUTH_TOKEN_KEY, response.token);
+        await setAuthToken(response.token);
         setUser(response.user);
       },
       signUp: async (name, username, email, password) => {
         const response = await authApi.register({ name, username, email, password });
-        await AsyncStorage.setItem(AUTH_TOKEN_KEY, response.token);
+        await setAuthToken(response.token);
         setUser(response.user);
       },
       signOut: async () => {
-        await AsyncStorage.multiRemove([AUTH_TOKEN_KEY, LEGACY_AUTH_TOKEN_KEY]);
+        await clearAuthToken();
         setUser(null);
       },
       updateProfile: async (payload) => {

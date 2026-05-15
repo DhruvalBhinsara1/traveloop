@@ -1,4 +1,4 @@
-import { ActivityInput, ChecklistItem, Note, StopInput, Trip, TripInput } from './types';
+import { ActivityInput, ChecklistItem, Note, PublicTrip, StopInput, Trip, TripInput } from './types';
 import { client } from './client';
 
 type CoverImageUpload = {
@@ -81,8 +81,11 @@ export const tripsApi = {
     const { data } = await client.put<Note>(`/api/notes/${id}`, { content });
     return data;
   },
+  deleteNote: async (id: number) => {
+    await client.delete(`/api/notes/${id}`);
+  },
   publicTrip: async (shareToken: string) => {
-    const { data } = await client.get<Trip>(`/api/public/${shareToken}`);
+    const { data } = await client.get<PublicTrip>(`/api/public/${shareToken}`);
     return data;
   }
 };

@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import { prisma } from '../prisma.js';
 import { asyncHandler, HttpError, parseDate, toInt } from '../utils/http.js';
-import { validateActivity } from '../utils/validators.js';
+import { validateActivity, validateActivityDuration } from '../utils/validators.js';
 
 export const activitiesRouter = Router();
 
@@ -49,15 +49,16 @@ const getOwnedActivity = async (id, userId) => {
 activitiesRouter.post('/stops/:stopId/activities', asyncHandler(async (req, res) => {
   const stop = await getOwnedStop(toInt(req.params.stopId, 'stopId'), req.user.id);
   const { name, description, category, cost, duration, date } = req.body;
-  validateActivity(req.body);
+  const { cost: parsedCost } = validateActivity(req.body);
+  const parsedDuration = validateActivityDuration(duration);
 
   const activity = await prisma.activity.create({
     data: {
       name: name.trim(),
       description: description?.trim() || null,
       category,
-      cost: cost === undefined || cost === null || cost === '' ? 0 : Number(cost),
-      duration: duration ? Number(duration) : null,
+      cost: parsedCost,
+      duration: parsedDuration,
       date: date ? parseDate(date, 'date') : null,
       stopId: stop.id
     }
@@ -69,7 +70,8 @@ activitiesRouter.post('/stops/:stopId/activities', asyncHandler(async (req, res)
 activitiesRouter.put('/activities/:id', asyncHandler(async (req, res) => {
   const existing = await getOwnedActivity(toInt(req.params.id), req.user.id);
   const { name, description, category, cost, duration, date } = req.body;
-  validateActivity(req.body);
+  const { cost: parsedCost } = validateActivity(req.body);
+  const parsedDuration = validateActivityDuration(duration);
 
   const activity = await prisma.activity.update({
     where: { id: existing.id },
@@ -77,8 +79,8 @@ activitiesRouter.put('/activities/:id', asyncHandler(async (req, res) => {
       name: name.trim(),
       description: description?.trim() || null,
       category,
-      cost: cost === undefined || cost === null || cost === '' ? 0 : Number(cost),
-      duration: duration ? Number(duration) : null,
+      cost: parsedCost,
+      duration: parsedDuration,
       date: date ? parseDate(date, 'date') : null
     }
   });

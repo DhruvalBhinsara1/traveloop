@@ -1,5 +1,5 @@
 import client from './client';
-import type { CreateStopPayload, Id, Stop, UpdateStopPayload } from './types';
+import type { CreateStopPayload, Id, Stop, Trip, UpdateStopPayload } from './types';
 
 export const stopsApi = {
   async create(tripId: Id, payload: CreateStopPayload) {
@@ -17,7 +17,7 @@ export const stopsApi = {
   },
 
   async reorder(tripId: Id, orderedIds: Id[]) {
-    const { data } = await client.patch<Stop[]>(`/api/trips/${tripId}/stops/reorder`, { orderedIds });
+    const { data } = await client.patch<Trip>(`/api/trips/${tripId}/stops/reorder`, { orderedIds });
     return data;
   }
 };

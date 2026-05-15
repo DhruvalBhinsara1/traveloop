@@ -2,6 +2,8 @@ import 'dotenv/config';
 
 import cors from 'cors';
 import express from 'express';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
 import morgan from 'morgan';
 
 import { requireAuth } from './middleware/auth.js';
@@ -22,8 +24,46 @@ if (!process.env.JWT_SECRET) {
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
+const rateLimitWindowMs = Number(process.env.RATE_LIMIT_WINDOW_MS ?? 900_000);
+const apiRateLimitMax = Number(process.env.API_RATE_LIMIT_MAX ?? 300);
+const authRateLimitMax = Number(process.env.AUTH_RATE_LIMIT_MAX ?? 20);
+const defaultCorsOrigins =
+  process.env.NODE_ENV === 'production'
+    ? []
+    : ['http://localhost:8081', 'http://127.0.0.1:8081', 'http://localhost:19006', 'http://127.0.0.1:19006'];
+const allowedCorsOrigins = new Set(
+  (process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : defaultCorsOrigins)
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
 
-app.use(cors({ origin: '*' }));
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin || allowedCorsOrigins.has(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new HttpError(403, 'Origin is not allowed by CORS'));
+  }
+};
+
+const apiLimiter = rateLimit({
+  windowMs: Number.isFinite(rateLimitWindowMs) && rateLimitWindowMs > 0 ? rateLimitWindowMs : 900_000,
+  max: Number.isFinite(apiRateLimitMax) && apiRateLimitMax > 0 ? apiRateLimitMax : 300,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const authLimiter = rateLimit({
+  windowMs: Number.isFinite(rateLimitWindowMs) && rateLimitWindowMs > 0 ? rateLimitWindowMs : 900_000,
+  max: Number.isFinite(authRateLimitMax) && authRateLimitMax > 0 ? authRateLimitMax : 20,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+app.use(helmet());
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
@@ -39,7 +79,8 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'traveloop-api' });
 });
 
-app.use('/api/auth', authRouter);
+app.use('/api', apiLimiter);
+app.use('/api/auth', authLimiter, authRouter);
 app.use('/api/public', publicRouter);
 app.use('/api/users', requireAuth, usersRouter);
 app.use('/api/friends', requireAuth, friendsRouter);

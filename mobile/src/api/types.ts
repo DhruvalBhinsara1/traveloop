@@ -107,6 +107,7 @@ export type BillParticipant = {
   tripId: number;
   userId?: number | null;
   user?: PublicUser | null;
+  canRemove: boolean;
   createdAt: string;
 };
 
@@ -166,6 +167,35 @@ export type Trip = {
   billExpenses?: BillExpense[];
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type PublicTripActivity = {
+  name: string;
+  description?: string | null;
+  category: ActivityCategory | string;
+  cost: number;
+  duration?: number | null;
+  date?: string | null;
+};
+
+export type PublicTripStop = {
+  cityName: string;
+  country: string;
+  arrivalDate: string;
+  departDate: string;
+  order: number;
+  activities: PublicTripActivity[];
+};
+
+export type PublicTrip = {
+  title: string;
+  description?: string | null;
+  coverImage?: string | null;
+  budget?: number | null;
+  startDate: string;
+  endDate: string;
+  user?: Omit<PublicUser, 'id' | 'createdAt'> | null;
+  stops: PublicTripStop[];
 };
 
 export type AuthResponse = {

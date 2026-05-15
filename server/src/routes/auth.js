@@ -4,7 +4,7 @@ import multer from 'multer';
 
 import { requireAuth, signToken } from '../middleware/auth.js';
 import { prisma } from '../prisma.js';
-import { uploadAvatar } from '../utils/cloudStorage.js';
+import { isAllowedImageMimeType, uploadAvatar } from '../utils/cloudStorage.js';
 import { asyncHandler, HttpError, sanitizeUser } from '../utils/http.js';
 import { normalizeUsername, validateAuth, validateLoginIdentifier, validateUsername } from '../utils/validators.js';
 
@@ -14,8 +14,8 @@ const avatarUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: Number(process.env.MAX_AVATAR_UPLOAD_BYTES ?? 3_000_000) },
   fileFilter: (_req, file, callback) => {
-    if (!file.mimetype.startsWith('image/')) {
-      callback(new HttpError(400, 'Profile photo must be an image'));
+    if (!isAllowedImageMimeType(file.mimetype)) {
+      callback(new HttpError(400, 'Profile photo must be a JPEG, PNG, or WebP image'));
       return;
     }
 

@@ -1,18 +1,17 @@
 import { Share } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 
-import { getApiBaseUrl } from '../api/client';
 import type { Trip } from '../api/types';
 
-export const buildPublicTripUrl = (shareToken: string) =>
-  `${getApiBaseUrl().replace(/\/$/, '')}/api/public/${shareToken}`;
+export const buildPublicTripLink = (shareToken: string) => `traveloop://public/${encodeURIComponent(shareToken)}`;
+export const buildPublicTripUrl = buildPublicTripLink;
 
 export const shareTrip = async (trip: Pick<Trip, 'title' | 'shareToken'>) => {
   if (!trip.shareToken) {
     throw new Error('This trip does not have a public share link yet.');
   }
 
-  const url = buildPublicTripUrl(trip.shareToken);
+  const url = buildPublicTripLink(trip.shareToken);
 
   await Share.share({
     title: trip.title,
@@ -24,7 +23,7 @@ export const shareTrip = async (trip: Pick<Trip, 'title' | 'shareToken'>) => {
 };
 
 export const copyPublicTripLink = async (shareToken: string) => {
-  const url = buildPublicTripUrl(shareToken);
+  const url = buildPublicTripLink(shareToken);
   await Clipboard.setStringAsync(url);
   return url;
 };

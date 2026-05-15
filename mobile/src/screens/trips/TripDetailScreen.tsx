@@ -1,11 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { GlassView } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, ImageBackground, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, ImageBackground, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { PieChart } from 'react-native-gifted-charts';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
@@ -44,8 +43,9 @@ import { AddActivitySheet } from './AddActivitySheet';
 import { AddStopSheet } from './AddStopSheet';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripDetail'>;
+type TripDetailTabName = keyof TripDetailTabParamList;
 
-const Tab = createMaterialTopTabNavigator<TripDetailTabParamList>();
+const tripTabs: TripDetailTabName[] = ['Itinerary', 'Budget', 'Split', 'Crew', 'Checklist', 'Notes'];
 
 const starterChecklist = [
   { label: 'Passport', category: 'documents' },
@@ -61,12 +61,16 @@ const chartColors = [colors.primary, colors.warning, colors.success, colors.gray
 export function TripDetailScreen({ route, navigation }: Props) {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
+  const { height: viewportHeight } = useWindowDimensions();
   const [trip, setTrip] = useState<Trip | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<TripDetailTabName>(route.params.initialTab ?? 'Itinerary');
   const [stopSheetVisible, setStopSheetVisible] = useState(false);
   const [activityStop, setActivityStop] = useState<Stop | null>(null);
   const [coverUploading, setCoverUploading] = useState(false);
   const [privacyUpdating, setPrivacyUpdating] = useState(false);
+  const detailScrollRef = useRef<ScrollView>(null);
+  const tabRailOffsetRef = useRef(0);
   const loadingTripRef = useRef<Promise<void> | null>(null);
 
   const loadTrip = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -95,13 +99,17 @@ export function TripDetailScreen({ route, navigation }: Props) {
     loadTrip();
   }, [loadTrip]);
 
+  useEffect(() => {
+    if (route.params.initialTab) setActiveTab(route.params.initialTab);
+  }, [route.params.initialTab]);
+
   useFocusedAutoRefresh(() => loadTrip({ silent: true }), {
     enabled: Boolean(trip) && !coverUploading && !privacyUpdating && !stopSheetVisible && !activityStop
   });
 
   const addStop = async (payload: StopInput) => {
     if (!trip) return;
-    await tripsApi.addStop(trip.id, { ...payload, order: trip.stops.length });
+    await tripsApi.addStop(trip.id, { ...payload, order: trip.stops.length + 1 });
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     await loadTrip();
   };
@@ -187,9 +195,15 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const saveNote = async (content: string) => {
     if (!trip) return;
     const existing = trip.notes[0];
+    const trimmedContent = content.trim();
     if (existing) {
-      await tripsApi.updateNote(existing.id, content);
+      if (trimmedContent) {
+        await tripsApi.updateNote(existing.id, content);
+      } else {
+        await tripsApi.deleteNote(existing.id);
+      }
     } else {
+      if (!trimmedContent) return;
       await tripsApi.addNote(trip.id, content);
     }
     await loadTrip();
@@ -291,129 +305,73 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const coverImage = trip.coverImage ?? getDestinationImage(sortedStops[0]?.cityName ?? trip.title);
   const activityCount = trip.stops.reduce((count, stop) => count + stop.activities.length, 0);
   const canManageTrip = trip.userId === user?.id;
-  const heroActionTop = Math.max((Platform.OS === 'android' ? StatusBar.currentHeight ?? insets.top : insets.top) + 12, 18);
+  const stickyTabTopPadding = Math.max(Platform.OS === 'android' ? StatusBar.currentHeight ?? 0 : insets.top - 24, 0);
+  const notesMinHeight = Math.max(360, viewportHeight - 260);
+  const tripTotal = calcTripTotal(trip);
+  const handleActiveTabChange = (nextTab: TripDetailTabName) => {
+    setActiveTab(nextTab);
+    requestAnimationFrame(() => {
+      if (tabRailOffsetRef.current > 0) {
+        detailScrollRef.current?.scrollTo({
+          y: Math.max(tabRailOffsetRef.current - stickyTabTopPadding, 0),
+          animated: true
+        });
+      }
+    });
+  };
 
   return (
     <View style={styles.safeArea}>
-      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
-      <ImageBackground source={{ uri: coverImage }} resizeMode="cover" style={styles.detailHero}>
-        <LinearGradient
-          colors={['rgba(15,23,20,0.54)', 'rgba(15,23,20,0.12)', 'rgba(15,23,20,0.50)']}
-          pointerEvents="none"
-          style={styles.detailHeroScrim}
-        />
-        <Pressable
-          accessibilityLabel="Change trip thumbnail"
-          accessibilityRole="button"
-          accessibilityState={{ disabled: !canManageTrip || coverUploading, busy: coverUploading }}
-          disabled={!canManageTrip || coverUploading}
-          onPress={changeCover}
-          style={styles.heroPressLayer}
-        />
-        <View style={[styles.heroActions, { top: heroActionTop }]}>
-          <Pressable accessibilityLabel="Go back" accessibilityRole="button" style={styles.heroIconButton} onPress={() => navigation.goBack()}>
-            <GlassView colorScheme="light" glassEffectStyle="regular" tintColor="rgba(255,255,255,0.58)" style={styles.heroGlassFill} />
-            <Ionicons name="chevron-back" size={24} color={colors.charcoal} />
-          </Pressable>
-          <View style={styles.heroRightActions}>
-            {canManageTrip ? (
-              <>
-                <Pressable
-                  accessibilityLabel="Change trip thumbnail"
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: coverUploading, busy: coverUploading }}
-                  disabled={coverUploading}
-                  style={[styles.heroIconButton, coverUploading && styles.disabled]}
-                  onPress={changeCover}
-                >
-                  <GlassView colorScheme="light" glassEffectStyle="regular" tintColor="rgba(255,255,255,0.58)" style={styles.heroGlassFill} />
-                  {coverUploading ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="camera-outline" size={21} color={colors.primary} />}
-                </Pressable>
-                <Pressable accessibilityLabel="Share trip" accessibilityRole="button" style={styles.heroIconButton} onPress={share}>
-                  <GlassView colorScheme="light" glassEffectStyle="regular" tintColor="rgba(255,255,255,0.58)" style={styles.heroGlassFill} />
-                  <Ionicons name={trip.isPublic ? 'globe-outline' : 'share-social-outline'} size={21} color={colors.charcoal} />
-                </Pressable>
-              </>
-            ) : null}
-          </View>
-        </View>
-      </ImageBackground>
-
-      <View style={styles.detailCard}>
-        <View style={styles.detailTitleRow}>
-          <Text numberOfLines={1} style={styles.detailTitle}>{trip.title}</Text>
-          {canManageTrip ? (
-            <Pressable
-              accessibilityLabel="Change trip thumbnail"
-              accessibilityRole="button"
-              accessibilityState={{ disabled: coverUploading, busy: coverUploading }}
-              disabled={coverUploading}
-              hitSlop={10}
-              onPress={changeCover}
-              style={[styles.titleEditButton, coverUploading && styles.disabled]}
-            >
-              <Ionicons name="pencil" size={16} color={colors.primary} />
-            </Pressable>
-          ) : null}
-        </View>
-        <View style={styles.detailMetaGrid}>
-          <DetailMeta icon="calendar-outline" label={`${formatDateRange(trip.startDate, trip.endDate)} · ${getTripDays(trip.startDate, trip.endDate)} days`} />
-          <DetailMeta icon="map-outline" label={`${trip.stops.length} ${trip.stops.length === 1 ? 'city' : 'cities'}`} />
-          <DetailMeta icon="sparkles-outline" label={`${activityCount} ${activityCount === 1 ? 'activity' : 'activities'}`} />
-          <DetailMeta icon={trip.isPublic ? 'globe-outline' : 'lock-closed-outline'} label={trip.isPublic ? 'Public' : 'Private'} />
-        </View>
-        {canManageTrip ? (
-          <PrivacySegment isPublic={trip.isPublic} loading={privacyUpdating} onChange={updateVisibility} />
-        ) : (
-          <View style={styles.collaboratorNotice}>
-            <Ionicons name="people-outline" size={16} color={colors.primary} />
-            <Text style={styles.collaboratorNoticeText}>Shared trip editor</Text>
-          </View>
-        )}
-      </View>
-
-      <Tab.Navigator
-        key={`${trip.id}-${route.params.initialTab ?? 'Itinerary'}`}
-        initialRouteName={route.params.initialTab ?? 'Itinerary'}
-        screenOptions={{
-          tabBarActiveTintColor: colors.primary,
-          tabBarInactiveTintColor: colors.gray600,
-          tabBarIndicatorStyle: styles.tabIndicator,
-          tabBarItemStyle: styles.tabItem,
-          tabBarLabelStyle: styles.tabLabel,
-          tabBarScrollEnabled: true,
-          tabBarStyle: styles.tabBar
-        }}
+      <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
+      <ScrollView
+        contentContainerStyle={styles.detailScrollContent}
+        contentInsetAdjustmentBehavior="never"
+        keyboardShouldPersistTaps="handled"
+        ref={detailScrollRef}
+        showsVerticalScrollIndicator={false}
+        stickyHeaderIndices={[2]}
       >
-        <Tab.Screen name="Itinerary">
-          {() => (
-            <ItineraryTab
-              trip={trip}
-              onAddStop={() => setStopSheetVisible(true)}
-              onAddActivity={setActivityStop}
-              onMoveStop={moveStop}
-              onDeleteStop={deleteStop}
-              onDeleteActivity={deleteActivity}
-            />
-          )}
-        </Tab.Screen>
-        <Tab.Screen name="Budget">{() => <BudgetTab trip={trip} />}</Tab.Screen>
-        <Tab.Screen name="Split">{() => <SplitTab tripId={trip.id} onExpensesChange={syncBillExpenses} />}</Tab.Screen>
-        <Tab.Screen name="Crew">
-          {() => <CrewTab trip={trip} canManage={canManageTrip} onTripChange={(updated) => setTrip(sortTrip(updated))} />}
-        </Tab.Screen>
-        <Tab.Screen name="Checklist">
-          {() => (
-            <ChecklistTab
-              trip={trip}
-              onAdd={addChecklistItem}
-              onToggle={toggleChecklistItem}
-              onDelete={deleteChecklistItem}
-            />
-          )}
-        </Tab.Screen>
-        <Tab.Screen name="Notes">{() => <NotesTab trip={trip} onSave={saveNote} />}</Tab.Screen>
-      </Tab.Navigator>
+        <TripHeroHeader
+          canManage={canManageTrip}
+          coverImage={coverImage}
+          coverUploading={coverUploading}
+          insetsTop={insets.top}
+          onBack={() => navigation.goBack()}
+          onChangeCover={changeCover}
+          onShare={share}
+          trip={trip}
+        />
+        <TripInfoRail
+          activityCount={activityCount}
+          canManage={canManageTrip}
+          onVisibilityChange={updateVisibility}
+          privacyUpdating={privacyUpdating}
+          total={tripTotal}
+          trip={trip}
+        />
+        <View onLayout={(event) => {
+          tabRailOffsetRef.current = event.nativeEvent.layout.y;
+        }}>
+          <TripTabRail activeTab={activeTab} onChange={handleActiveTabChange} topInset={stickyTabTopPadding} />
+        </View>
+        <ActiveTripTabContent
+          activeTab={activeTab}
+          canManageTrip={canManageTrip}
+          notesMinHeight={notesMinHeight}
+          onAddActivity={setActivityStop}
+          onAddChecklistItem={addChecklistItem}
+          onAddStop={() => setStopSheetVisible(true)}
+          onDeleteActivity={deleteActivity}
+          onDeleteChecklistItem={deleteChecklistItem}
+          onDeleteStop={deleteStop}
+          onMoveStop={moveStop}
+          onNotesSave={saveNote}
+          onSyncBillExpenses={syncBillExpenses}
+          onToggleChecklistItem={toggleChecklistItem}
+          onTripChange={(updated) => setTrip(sortTrip(updated))}
+          trip={trip}
+        />
+      </ScrollView>
 
       <AddStopSheet visible={stopSheetVisible} trip={trip} onClose={() => setStopSheetVisible(false)} onSubmit={addStop} />
       <AddActivitySheet
@@ -428,11 +386,215 @@ export function TripDetailScreen({ route, navigation }: Props) {
   );
 }
 
-function DetailMeta({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+function TripHeroHeader({
+  trip,
+  coverImage,
+  canManage,
+  coverUploading,
+  insetsTop,
+  onBack,
+  onChangeCover,
+  onShare
+}: {
+  trip: Trip;
+  coverImage: string;
+  canManage: boolean;
+  coverUploading: boolean;
+  insetsTop: number;
+  onBack: () => void;
+  onChangeCover: () => void;
+  onShare: () => void;
+}) {
+  const actionTop = Math.max(insetsTop + 6, 16);
+
   return (
-    <View style={styles.detailMetaItem}>
-      <Ionicons name={icon} size={14} color={colors.gray600} />
-      <Text numberOfLines={1} style={styles.detailMetaText}>{label}</Text>
+    <ImageBackground source={{ uri: coverImage }} resizeMode="cover" style={styles.compactHero} imageStyle={styles.compactHeroImage}>
+      <LinearGradient
+        colors={['rgba(15,23,20,0.48)', 'rgba(15,23,20,0.10)', 'rgba(15,23,20,0.68)']}
+        pointerEvents="none"
+        style={styles.compactHeroScrim}
+      />
+      <View style={[styles.compactHeroActions, { top: actionTop }]}>
+        <Pressable accessibilityLabel="Go back" accessibilityRole="button" style={styles.heroIconButton} onPress={onBack}>
+          <GlassView colorScheme="light" glassEffectStyle="regular" tintColor="rgba(255,255,255,0.58)" style={styles.heroGlassFill} />
+          <Ionicons name="chevron-back" size={24} color={colors.charcoal} />
+        </Pressable>
+        {canManage ? (
+          <View style={styles.heroRightActions}>
+            <Pressable
+              accessibilityLabel="Change trip thumbnail"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: coverUploading, busy: coverUploading }}
+              disabled={coverUploading}
+              onPress={onChangeCover}
+              style={[styles.heroIconButton, coverUploading && styles.disabled]}
+            >
+              <GlassView colorScheme="light" glassEffectStyle="regular" tintColor="rgba(255,255,255,0.58)" style={styles.heroGlassFill} />
+              {coverUploading ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="camera-outline" size={21} color={colors.primary} />}
+            </Pressable>
+            <Pressable accessibilityLabel="Share trip" accessibilityRole="button" style={styles.heroIconButton} onPress={onShare}>
+              <GlassView colorScheme="light" glassEffectStyle="regular" tintColor="rgba(255,255,255,0.58)" style={styles.heroGlassFill} />
+              <Ionicons name={trip.isPublic ? 'globe-outline' : 'share-social-outline'} size={21} color={colors.charcoal} />
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
+      <View style={[styles.compactHeroCopy, canManage && styles.compactHeroCopyWithActions]}>
+        <Text numberOfLines={2} style={styles.compactHeroTitle}>{trip.title}</Text>
+        <Text numberOfLines={1} style={styles.compactHeroMeta}>
+          {formatDateRange(trip.startDate, trip.endDate)} · {getTripDays(trip.startDate, trip.endDate)} days
+        </Text>
+      </View>
+    </ImageBackground>
+  );
+}
+
+function TripInfoRail({
+  trip,
+  activityCount,
+  total,
+  canManage,
+  privacyUpdating,
+  onVisibilityChange
+}: {
+  trip: Trip;
+  activityCount: number;
+  total: number;
+  canManage: boolean;
+  privacyUpdating: boolean;
+  onVisibilityChange: (isPublic: boolean) => void;
+}) {
+  const budget = Number(trip.budget ?? 0);
+  const spendLabel = budget > 0 ? `${formatMoney(total)} / ${formatMoney(budget)}` : formatMoney(total);
+
+  return (
+    <View style={styles.infoRail}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.infoChipRow}>
+        <InfoChip icon="map-outline" label={`${trip.stops.length} ${trip.stops.length === 1 ? 'city' : 'cities'}`} />
+        <InfoChip icon="sparkles-outline" label={`${activityCount} ${activityCount === 1 ? 'activity' : 'activities'}`} />
+        <InfoChip icon="wallet-outline" label={spendLabel} />
+        <InfoChip icon={trip.isPublic ? 'globe-outline' : 'lock-closed-outline'} label={trip.isPublic ? 'Public' : 'Private'} />
+      </ScrollView>
+      {canManage ? (
+        <View style={styles.infoRailControl}>
+          <PrivacySegment isPublic={trip.isPublic} loading={privacyUpdating} onChange={onVisibilityChange} />
+        </View>
+      ) : (
+        <View style={styles.collaboratorNotice}>
+          <Ionicons name="people-outline" size={16} color={colors.primary} />
+          <Text style={styles.collaboratorNoticeText}>Shared editor</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function InfoChip({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+  return (
+    <View style={styles.infoChip}>
+      <Ionicons name={icon} size={15} color={colors.primary} />
+      <Text numberOfLines={1} style={styles.infoChipText}>{label}</Text>
+    </View>
+  );
+}
+
+function TripTabRail({
+  activeTab,
+  onChange,
+  topInset
+}: {
+  activeTab: TripDetailTabName;
+  onChange: (tab: TripDetailTabName) => void;
+  topInset: number;
+}) {
+  return (
+    <View style={[styles.stickyTabsShell, { paddingTop: topInset }]}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRailContent}>
+        {tripTabs.map((tab) => {
+          const active = activeTab === tab;
+          return (
+            <Pressable
+              accessibilityLabel={`Show ${tab} tab`}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              key={tab}
+              onPress={() => onChange(tab)}
+              style={[styles.tabRailItem, active && styles.tabRailItemActive]}
+            >
+              <Text numberOfLines={1} style={[styles.tabRailText, active && styles.tabRailTextActive]}>{tab}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+function ActiveTripTabContent({
+  activeTab,
+  trip,
+  canManageTrip,
+  notesMinHeight,
+  onAddStop,
+  onAddActivity,
+  onMoveStop,
+  onDeleteStop,
+  onDeleteActivity,
+  onSyncBillExpenses,
+  onTripChange,
+  onAddChecklistItem,
+  onToggleChecklistItem,
+  onDeleteChecklistItem,
+  onNotesSave
+}: {
+  activeTab: TripDetailTabName;
+  trip: Trip;
+  canManageTrip: boolean;
+  notesMinHeight: number;
+  onAddStop: () => void;
+  onAddActivity: (stop: Stop) => void;
+  onMoveStop: (stop: Stop, direction: -1 | 1) => void;
+  onDeleteStop: (stop: Stop) => void;
+  onDeleteActivity: (activity: Activity) => void;
+  onSyncBillExpenses: (expenses: BillExpense[]) => void;
+  onTripChange: (trip: Trip) => void;
+  onAddChecklistItem: (label: string, category: string) => Promise<void>;
+  onToggleChecklistItem: (item: ChecklistItem) => Promise<void>;
+  onDeleteChecklistItem: (item: ChecklistItem) => Promise<void>;
+  onNotesSave: (content: string) => Promise<void>;
+}) {
+  return (
+    <View style={styles.activeTabPanel}>
+      <View style={activeTab === 'Itinerary' ? undefined : styles.hiddenTab}>
+        <ItineraryTab
+          trip={trip}
+          onAddStop={onAddStop}
+          onAddActivity={onAddActivity}
+          onMoveStop={onMoveStop}
+          onDeleteStop={onDeleteStop}
+          onDeleteActivity={onDeleteActivity}
+        />
+      </View>
+      <View style={activeTab === 'Budget' ? undefined : styles.hiddenTab}>
+        <BudgetTab trip={trip} />
+      </View>
+      <View style={activeTab === 'Split' ? undefined : styles.hiddenTab}>
+        <SplitTab tripId={trip.id} onExpensesChange={onSyncBillExpenses} />
+      </View>
+      <View style={activeTab === 'Crew' ? undefined : styles.hiddenTab}>
+        <CrewTab trip={trip} canManage={canManageTrip} onTripChange={onTripChange} />
+      </View>
+      <View style={activeTab === 'Checklist' ? undefined : styles.hiddenTab}>
+        <ChecklistTab
+          trip={trip}
+          onAdd={onAddChecklistItem}
+          onToggle={onToggleChecklistItem}
+          onDelete={onDeleteChecklistItem}
+        />
+      </View>
+      <View style={activeTab === 'Notes' ? undefined : styles.hiddenTab}>
+        <NotesTab trip={trip} minHeight={notesMinHeight} onSave={onNotesSave} />
+      </View>
     </View>
   );
 }
@@ -494,7 +656,7 @@ function ItineraryTab({
   const [managedStopId, setManagedStopId] = useState<number | null>(null);
 
   return (
-    <ScrollView contentContainerStyle={styles.tabContent}>
+    <View style={styles.tabContent}>
       {trip.description ? (
         <View style={styles.itineraryNote}>
           <Ionicons name="reader-outline" size={18} color={colors.primary} />
@@ -507,7 +669,7 @@ function ItineraryTab({
           {stops.map((stop, index) => (
             <StopTimelineItem
               index={index}
-              isLast={false}
+              isLast={index === stops.length - 1}
               isManaged={managedStopId === stop.id}
               key={stop.id}
               onAddActivity={() => onAddActivity(stop)}
@@ -536,7 +698,7 @@ function ItineraryTab({
       ) : (
         <EmptyPanel title="No stops yet" body="Add a city stop to start building your timeline." actionLabel="Add Stop" onAction={onAddStop} />
       )}
-    </ScrollView>
+    </View>
   );
 }
 
@@ -702,7 +864,7 @@ function BudgetTab({ trip }: { trip: Trip }) {
     : chartData;
 
   return (
-    <ScrollView contentContainerStyle={styles.tabContent}>
+    <View style={styles.tabContent}>
       <View style={styles.budgetCard}>
         <Text style={styles.meta}>Estimated spend</Text>
         <Text style={[styles.budgetTotal, budget > 0 && total > budget && styles.dangerText]}>{formatMoney(total)}</Text>
@@ -736,7 +898,7 @@ function BudgetTab({ trip }: { trip: Trip }) {
           <Text style={styles.cost}>{formatMoney(item.value)}</Text>
         </View>
       ))}
-    </ScrollView>
+    </View>
   );
 }
 
@@ -797,7 +959,7 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
   };
 
   const removeParticipant = (participant: BillParticipant) => {
-    if (participant.userId) {
+    if (!participant.canRemove) {
       Toast.show({ type: 'info', text1: 'Trip members stay in split', text2: 'Remove them from Crew if they should lose trip access.' });
       return;
     }
@@ -853,7 +1015,7 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
 
   if (loading) {
     return (
-      <View style={styles.splitLoading}>
+      <View style={[styles.tabContent, styles.splitLoading]}>
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -865,7 +1027,7 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
   const canAddExpense = Boolean(expenseTitle.trim() && Number(expenseAmount.replace(/,/g, '').trim()) > 0 && selectedPayerId);
 
   return (
-    <ScrollView contentContainerStyle={styles.tabContent}>
+    <View style={styles.tabContent}>
       <View style={styles.splitHeroCard}>
         <View style={styles.splitHeroTop}>
           <View>
@@ -899,7 +1061,7 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
                 style={styles.participantChip}
               >
                 <Text numberOfLines={1} style={styles.participantChipText}>{participant.name}</Text>
-                <Ionicons name={participant.userId ? 'person-circle-outline' : 'close-circle'} size={16} color={colors.gray400} />
+                <Ionicons name={participant.canRemove ? 'close-circle' : 'person-circle-outline'} size={16} color={colors.gray400} />
               </Pressable>
             ))}
           </View>
@@ -989,7 +1151,7 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
           <EmptyPanel title="No shared costs yet" body="Add the first group expense to see who owes what." compact />
         )}
       </View>
-    </ScrollView>
+    </View>
   );
 }
 
@@ -1108,7 +1270,7 @@ function CrewTab({
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.tabContent}>
+    <View style={styles.tabContent}>
       <View style={styles.crewHero}>
         <View style={styles.crewHeroIcon}>
           <Ionicons name="people-outline" size={22} color={colors.primary} />
@@ -1190,7 +1352,7 @@ function CrewTab({
           <CrewRow key={`group-${member.id}`} user={member.user} role="Group" />
         ))}
       </View>
-    </ScrollView>
+    </View>
   );
 }
 
@@ -1284,7 +1446,7 @@ function ChecklistTab({
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.tabContent}>
+    <View style={styles.tabContent}>
       <View style={styles.summary}>
         <Text style={styles.stopTitle}>{packed} / {trip.checklist.length} packed</Text>
         <ProgressBar value={packed} max={trip.checklist.length || 1} tone="success" />
@@ -1316,11 +1478,11 @@ function ChecklistTab({
           </Pressable>
         </View>
       ))}
-    </ScrollView>
+    </View>
   );
 }
 
-function NotesTab({ trip, onSave }: { trip: Trip; onSave: (content: string) => Promise<void> }) {
+function NotesTab({ trip, minHeight, onSave }: { trip: Trip; minHeight: number; onSave: (content: string) => Promise<void> }) {
   const initial = trip.notes[0]?.content ?? '';
   const [content, setContent] = useState(initial);
   const lastSaved = useRef(initial);
@@ -1354,7 +1516,7 @@ function NotesTab({ trip, onSave }: { trip: Trip; onSave: (content: string) => P
         textAlignVertical="top"
         placeholder="Hotel confirmations, day plans, journal notes..."
         placeholderTextColor={colors.gray400}
-        style={styles.notesInput}
+        style={[styles.notesInput, { minHeight }]}
       />
       <Text style={styles.meta}>Auto-saving</Text>
     </View>
@@ -1427,20 +1589,26 @@ const styles = StyleSheet.create({
     padding: 24,
     gap: 16
   },
-  detailHero: {
-    height: Platform.OS === 'ios' ? 284 : 250,
+  detailScrollContent: {
+    backgroundColor: colors.background,
+    paddingBottom: 36
+  },
+  compactHero: {
+    height: Platform.OS === 'ios' ? 168 : 150,
     backgroundColor: colors.charcoal,
     position: 'relative'
   },
-  detailHeroScrim: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 0
+  compactHeroImage: {
+    borderBottomLeftRadius: radius.xl,
+    borderBottomRightRadius: radius.xl
   },
-  heroPressLayer: {
+  compactHeroScrim: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 1
+    zIndex: 0,
+    borderBottomLeftRadius: radius.xl,
+    borderBottomRightRadius: radius.xl
   },
-  heroActions: {
+  compactHeroActions: {
     position: 'absolute',
     left: 16,
     right: 16,
@@ -1468,52 +1636,108 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     borderRadius: 22
   },
-  detailCard: {
-    marginTop: -30,
-    borderTopLeftRadius: radius.bottomSheet,
-    borderTopRightRadius: radius.bottomSheet,
-    backgroundColor: colors.white,
-    paddingHorizontal: 20,
-    paddingTop: 22,
-    paddingBottom: 16,
-    gap: 12
+  compactHeroCopy: {
+    position: 'absolute',
+    left: 84,
+    right: 20,
+    bottom: 14,
+    zIndex: 2,
+    gap: 2
   },
-  detailTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8
+  compactHeroCopyWithActions: {
+    right: 124
   },
-  titleEditButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primaryLight
+  compactHeroTitle: {
+    color: colors.white,
+    fontFamily: fontFamily.headingExtraBold,
+    fontSize: 26,
+    lineHeight: 30
   },
-  detailTitle: {
-    ...typography.h2,
-    flex: 1
+  compactHeroMeta: {
+    color: colors.textOnDarkMuted,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 13,
+    lineHeight: 17
   },
-  detailMetaGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  infoRail: {
+    backgroundColor: colors.background,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 12,
     gap: 10
   },
-  detailMetaItem: {
-    minHeight: 26,
+  infoChipRow: {
+    gap: 8,
+    paddingRight: 16
+  },
+  infoChip: {
+    minHeight: 34,
+    maxWidth: 190,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 11,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    maxWidth: '48%'
+    gap: 6
   },
-  detailMetaText: {
-    ...typography.caption,
-    color: colors.gray600,
+  infoChipText: {
+    color: colors.gray800,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 12,
+    lineHeight: 16,
     flexShrink: 1
   },
+  infoRailControl: {
+    alignSelf: 'stretch'
+  },
+  stickyTabsShell: {
+    backgroundColor: colors.white,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    zIndex: 10,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6
+  },
+  tabRailContent: {
+    minHeight: 48,
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14
+  },
+  tabRailItem: {
+    minWidth: 72,
+    minHeight: 36,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10
+  },
+  tabRailItemActive: {
+    backgroundColor: colors.primaryLight
+  },
+  tabRailText: {
+    color: colors.gray600,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 13,
+    lineHeight: 17
+  },
+  tabRailTextActive: {
+    color: colors.primary,
+    fontFamily: fontFamily.headingBold
+  },
+  activeTabPanel: {
+    backgroundColor: colors.background
+  },
+  hiddenTab: {
+    display: 'none'
+  },
   privacySegment: {
-    minHeight: 44,
+    minHeight: 38,
     borderRadius: radius.pill,
     padding: 4,
     flexDirection: 'row',
@@ -1535,8 +1759,8 @@ const styles = StyleSheet.create({
   privacyOptionText: {
     ...typography.bodyMedium,
     color: colors.gray600,
-    fontSize: 13,
-    lineHeight: 17
+    fontSize: 12,
+    lineHeight: 16
   },
   privacyOptionTextActive: {
     color: colors.white
@@ -1558,49 +1782,6 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.bodyMedium,
     fontSize: 13,
     lineHeight: 17
-  },
-  header: {
-    minHeight: 70,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.gray100,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10
-  },
-  iconButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.gray100
-  },
-  headerCopy: {
-    flex: 1
-  },
-  headerTitle: {
-    ...typography.label
-  },
-  headerMeta: {
-    ...typography.caption
-  },
-  tabBar: {
-    backgroundColor: colors.white
-  },
-  tabItem: {
-    width: 92
-  },
-  tabIndicator: {
-    backgroundColor: colors.primary,
-    height: 3,
-    borderRadius: 2
-  },
-  tabLabel: {
-    fontFamily: 'Nunito_700Bold',
-    textTransform: 'none',
-    fontSize: 13
   },
   tabContent: {
     padding: 20,
@@ -2020,10 +2201,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14
   },
   splitLoading: {
-    flex: 1,
+    minHeight: 240,
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background
+    justifyContent: 'center'
   },
   splitHeroCard: {
     borderRadius: radius.card,
@@ -2377,15 +2557,15 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through'
   },
   notesWrap: {
-    flex: 1,
     padding: 20,
-    backgroundColor: colors.white
+    backgroundColor: colors.background,
+    gap: 8
   },
   notesInput: {
-    flex: 1,
-    minHeight: 360,
     borderRadius: 20,
-    backgroundColor: colors.gray100,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: 18,
     textAlignVertical: 'top',
     ...typography.bodyMedium

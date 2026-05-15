@@ -2,6 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { Activity, ActivityCategory, BillExpense, Stop, Trip } from '../api/types';
 
+type CostedStop = { activities?: Array<{ cost?: number | null }> };
+type CategorizedStop = { activities?: Array<{ category: ActivityCategory; cost?: number | null }> };
+
 export const CATEGORY_LABELS: Record<ActivityCategory, string> = {
   sightseeing: 'Sightseeing',
   food: 'Food',
@@ -31,7 +34,7 @@ export const CATEGORY_COLORS: Record<ActivityCategory, string> = {
 
 export const ACTIVITY_CATEGORIES = Object.keys(CATEGORY_LABELS) as ActivityCategory[];
 
-export const calcTotal = (stops: Stop[] = []) =>
+export const calcTotal = (stops: CostedStop[] = []) =>
   stops.flatMap((stop) => stop.activities ?? []).reduce((sum, activity) => sum + Number(activity.cost || 0), 0);
 
 export const calcSharedExpenseTotal = (expenses: BillExpense[] = []) =>
@@ -40,7 +43,7 @@ export const calcSharedExpenseTotal = (expenses: BillExpense[] = []) =>
 export const calcTripTotal = (trip?: Trip | null) =>
   calcTotal(trip?.stops ?? []) + calcSharedExpenseTotal(trip?.billExpenses ?? []);
 
-export const calcByCategory = (stops: Stop[] = []) =>
+export const calcByCategory = (stops: CategorizedStop[] = []) =>
   stops.flatMap((stop) => stop.activities ?? []).reduce<Record<ActivityCategory, number>>((acc, activity) => {
     acc[activity.category] = (acc[activity.category] || 0) + Number(activity.cost || 0);
     return acc;

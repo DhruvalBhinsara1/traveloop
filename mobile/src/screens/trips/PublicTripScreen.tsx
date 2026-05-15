@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { tripsApi } from '../../api/trips';
-import { Trip } from '../../api/types';
+import { PublicTrip } from '../../api/types';
 import { Button } from '../../components/Button';
 import { Screen } from '../../components/Screen';
 import { ActivityItem } from '../../components/TripBuilding';
@@ -15,7 +15,7 @@ import { RootStackParamList } from '../../navigation/types';
 type Props = NativeStackScreenProps<RootStackParamList, 'PublicTrip'>;
 
 export function PublicTripScreen({ route, navigation }: Props) {
-  const [trip, setTrip] = useState<Trip | null>(null);
+  const [trip, setTrip] = useState<PublicTrip | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -54,13 +54,13 @@ export function PublicTripScreen({ route, navigation }: Props) {
         by {trip.user?.name ?? 'Traveler'} - {formatDateRange(trip.startDate, trip.endDate)} - {nightsBetween(trip.startDate, trip.endDate)} days
       </Text>
       <View style={styles.list}>
-        {trip.stops.map((stop) => (
-          <View key={stop.id} style={styles.stop}>
+        {trip.stops.map((stop, stopIndex) => (
+          <View key={`${stop.order}-${stop.cityName}-${stopIndex}`} style={styles.stop}>
             <Text style={styles.stopTitle}>
               {stop.cityName}, {stop.country}
             </Text>
-            {stop.activities.map((activity) => (
-              <ActivityItem key={activity.id} activity={activity} />
+            {stop.activities.map((activity, activityIndex) => (
+              <ActivityItem key={`${activity.name}-${activity.date ?? 'open'}-${activityIndex}`} activity={activity} />
             ))}
           </View>
         ))}

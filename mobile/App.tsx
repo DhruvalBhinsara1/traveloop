@@ -1,4 +1,4 @@
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, LinkingOptions } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import {
   Nunito_400Regular,
@@ -16,7 +16,17 @@ import Toast from 'react-native-toast-message';
 
 import { AuthProvider } from './src/context/AuthContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { RootStackParamList } from './src/navigation/types';
 import { colors } from './src/theme/colors';
+
+const linking: LinkingOptions<RootStackParamList> = {
+  prefixes: ['traveloop://'],
+  config: {
+    screens: {
+      PublicTrip: 'public/:shareToken'
+    }
+  }
+};
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -38,7 +48,7 @@ export default function App() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer linking={linking}>
       <AuthProvider>
         <AppNavigator />
         <Toast />

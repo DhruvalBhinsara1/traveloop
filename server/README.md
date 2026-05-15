@@ -35,7 +35,7 @@ Trips:
 
 ## Cloud Image Storage
 
-Trip cover and profile photo uploads are sent to Cloudinary from the server so API secrets never ship in the mobile app. Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in `server/.env`; leave real values out of Git.
+Trip cover and profile photo uploads are sent to Cloudinary from the server so API secrets never ship in the mobile app. Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in `server/.env`; leave real values out of Git. Uploads accept JPEG, PNG, and WebP files only.
 
 Stops:
 
@@ -67,3 +67,10 @@ Notes:
 Public:
 
 - `GET /api/public/:shareToken`
+- `GET /api/public/trips/:shareToken`
+
+Public trip responses are sanitized for sharing. They include owner display info and itinerary details, but exclude notes, checklist items, crew/group data, IDs, and share tokens.
+
+## API Hardening
+
+Set `CORS_ORIGINS` to a comma-separated list of browser origins. Native app requests without an `Origin` header are allowed. Rate limits default to 300 API requests and 20 auth requests per 15-minute window and can be overridden with `API_RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_MAX`, and `RATE_LIMIT_WINDOW_MS`.
