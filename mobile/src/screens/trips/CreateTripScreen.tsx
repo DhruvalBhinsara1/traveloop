@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -21,6 +20,7 @@ import { getApiErrorMessage } from '../../api/client';
 import { socialApi } from '../../api/social';
 import { tripsApi } from '../../api/trips';
 import { FriendGroup, PublicUser } from '../../api/types';
+import { HapticPressable as Pressable } from '../../components/HapticPressable';
 import type { RootStackParamList } from '../../navigation/types';
 import { formatDate, toIsoDate } from '../../utils/dateHelpers';
 import { colors, fonts, radii, spacing } from '../../utils/theme';

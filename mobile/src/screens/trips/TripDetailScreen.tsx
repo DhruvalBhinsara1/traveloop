@@ -4,7 +4,7 @@ import { GlassView } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, ImageBackground, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, ImageBackground, Platform, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { PieChart } from 'react-native-gifted-charts';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
@@ -16,21 +16,23 @@ import { getErrorMessage } from '../../api/client';
 import { socialApi } from '../../api/social';
 import { stopsApi } from '../../api/stops';
 import { tripsApi } from '../../api/trips';
-import { Activity, ActivityCategory, ActivityInput, BillExpense, BillParticipant, BillSplit, ChecklistItem, PublicUser, Stop, StopInput, Trip } from '../../api/types';
+import { Activity, ActivityCategory, ActivityInput, BillExpense, BillParticipant, BillSettlement, BillSplit, BillSplitMode, ChecklistItem, PublicUser, Stop, StopInput, Trip } from '../../api/types';
 import { Button } from '../../components/Button';
+import { HapticPressable as Pressable } from '../../components/HapticPressable';
 import { ProgressBar } from '../../components/ProgressBar';
 import { useAuth } from '../../context/AuthContext';
 import { useFocusedAutoRefresh } from '../../hooks/useFocusedAutoRefresh';
+import { useStagedRefreshControl } from '../../hooks/useStagedRefreshControl';
 import { colors, fontFamily, radius, shadows, typography } from '../../theme';
 import {
   CATEGORY_COLORS,
   CATEGORY_ICONS,
   CATEGORY_LABELS,
+  ACTIVITY_CATEGORIES,
   calcByCategory,
   calcSharedExpenseTotal,
   calcStopSubtotal,
   calcTotal,
-  calcTripTotal,
   formatMoney,
   sortActivitiesByDate
 } from '../../utils/budgetCalc';
@@ -57,13 +59,46 @@ const starterChecklist = [
 ];
 
 const chartColors = [colors.primary, colors.warning, colors.success, colors.gray600, colors.danger, colors.gray400];
+const splitModeOptions: BillSplitMode[] = ['equal', 'exact', 'percent', 'shares'];
+const splitModeLabels: Record<BillSplitMode, string> = {
+  equal: 'Equal',
+  exact: 'Exact',
+  percent: '%',
+  shares: 'Shares'
+};
+
+const isParticipantUsableForNewExpense = (participant: BillParticipant) =>
+  participant.canUseInNewExpense ?? (!participant.archivedAt && !['archived', 'former'].includes(String(participant.status ?? '')));
+
+const getSharedSpendTotal = (split: BillSplit | null, expenses: BillExpense[] = []) =>
+  split?.summary?.total ?? calcSharedExpenseTotal(expenses);
+
+const getTripSpendTotal = (trip: Trip, split: BillSplit | null) =>
+  calcTotal(trip.stops ?? []) + getSharedSpendTotal(split, trip.billExpenses ?? []);
+
+const participantDisplayName = (participant: BillParticipant | null | undefined, currentUserId?: number, fallback = 'Traveler') =>
+  currentUserId && participant?.userId === currentUserId ? 'You' : participant?.name ?? fallback;
+
+const isBillCrewParticipant = (participant: BillParticipant) =>
+  participant.isActiveTripUser ?? (!participant.canRemove && Boolean(participant.userId));
+
+const isHistoricalBillParticipant = (participant: BillParticipant) =>
+  participant.status === 'former' || participant.status === 'archived' || Boolean(participant.archivedAt);
+
+const billParticipantRoleLabel = (participant: BillParticipant) => {
+  if (participant.status === 'former') return 'Former crew';
+  if (participant.status === 'archived' || participant.archivedAt) return 'Archived';
+  return isBillCrewParticipant(participant) ? 'Crew' : 'Split-only';
+};
 
 export function TripDetailScreen({ route, navigation }: Props) {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { height: viewportHeight } = useWindowDimensions();
   const [trip, setTrip] = useState<Trip | null>(null);
+  const [billSplit, setBillSplit] = useState<BillSplit | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<TripDetailTabName>(route.params.initialTab ?? 'Itinerary');
   const [stopSheetVisible, setStopSheetVisible] = useState(false);
   const [activityStop, setActivityStop] = useState<Stop | null>(null);
@@ -72,14 +107,26 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const detailScrollRef = useRef<ScrollView>(null);
   const tabRailOffsetRef = useRef(0);
   const loadingTripRef = useRef<Promise<void> | null>(null);
+  const billSyncVersionRef = useRef(0);
 
   const loadTrip = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     if (loadingTripRef.current) return loadingTripRef.current;
+    const startedBillSyncVersion = billSyncVersionRef.current;
 
     const request = tripsApi
       .get(route.params.tripId)
       .then((data) => {
-        setTrip(sortTrip(data));
+        const sorted = sortTrip(data);
+        setTrip((current) => {
+          if (current?.id === sorted.id && billSyncVersionRef.current !== startedBillSyncVersion) {
+            return sortTrip({
+              ...sorted,
+              billExpenses: current.billExpenses,
+              billSettlements: current.billSettlements
+            });
+          }
+          return sorted;
+        });
       })
       .catch((error) => {
         if (!silent) {
@@ -102,6 +149,11 @@ export function TripDetailScreen({ route, navigation }: Props) {
   useEffect(() => {
     if (route.params.initialTab) setActiveTab(route.params.initialTab);
   }, [route.params.initialTab]);
+
+  useEffect(() => {
+    setBillSplit(null);
+    billSyncVersionRef.current = 0;
+  }, [route.params.tripId]);
 
   useFocusedAutoRefresh(() => loadTrip({ silent: true }), {
     enabled: Boolean(trip) && !coverUploading && !privacyUpdating && !stopSheetVisible && !activityStop
@@ -247,9 +299,45 @@ export function TripDetailScreen({ route, navigation }: Props) {
     }
   };
 
-  const syncBillExpenses = useCallback((expenses: BillExpense[]) => {
-    setTrip((current) => (current ? { ...current, billExpenses: expenses } : current));
+  const applySplitUpdate = useCallback((split: BillSplit) => {
+    billSyncVersionRef.current += 1;
+    setBillSplit(split);
+    setTrip((current) =>
+      current
+        ? {
+            ...current,
+            billExpenses: split.expenses,
+            billSettlements: split.settlements ?? []
+          }
+        : current
+    );
   }, []);
+
+  const refreshTripDetail = useCallback(async () => {
+    if (refreshing) return;
+
+    setRefreshing(true);
+    try {
+      const [splitResult] = await Promise.all([
+        billsApi.get(route.params.tripId).catch((error) => {
+          Toast.show({ type: 'error', text1: 'Could not refresh shared bills', text2: getErrorMessage(error) });
+          return null;
+        }),
+        loadTrip({ silent: true })
+      ]);
+
+      if (splitResult) applySplitUpdate(splitResult);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [applySplitUpdate, loadTrip, refreshing, route.params.tripId]);
+
+  const stickyTabTopPadding = Math.max(Platform.OS === 'android' ? StatusBar.currentHeight ?? 0 : insets.top - 24, 0);
+  const stagedRefresh = useStagedRefreshControl({
+    progressViewOffset: stickyTabTopPadding,
+    refreshing,
+    onRefresh: refreshTripDetail
+  });
 
   const changeCover = async () => {
     if (!trip || coverUploading) return;
@@ -305,9 +393,8 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const coverImage = trip.coverImage ?? getDestinationImage(sortedStops[0]?.cityName ?? trip.title);
   const activityCount = trip.stops.reduce((count, stop) => count + stop.activities.length, 0);
   const canManageTrip = trip.userId === user?.id;
-  const stickyTabTopPadding = Math.max(Platform.OS === 'android' ? StatusBar.currentHeight ?? 0 : insets.top - 24, 0);
   const notesMinHeight = Math.max(360, viewportHeight - 260);
-  const tripTotal = calcTripTotal(trip);
+  const tripTotal = getTripSpendTotal(trip, billSplit);
   const handleActiveTabChange = (nextTab: TripDetailTabName) => {
     setActiveTab(nextTab);
     requestAnimationFrame(() => {
@@ -328,6 +415,10 @@ export function TripDetailScreen({ route, navigation }: Props) {
         contentInsetAdjustmentBehavior="never"
         keyboardShouldPersistTaps="handled"
         ref={detailScrollRef}
+        onMomentumScrollEnd={stagedRefresh.onMomentumScrollEnd}
+        onScroll={stagedRefresh.onScroll}
+        refreshControl={stagedRefresh.refreshControl}
+        scrollEventThrottle={stagedRefresh.scrollEventThrottle}
         showsVerticalScrollIndicator={false}
         stickyHeaderIndices={[2]}
       >
@@ -366,9 +457,11 @@ export function TripDetailScreen({ route, navigation }: Props) {
           onDeleteStop={deleteStop}
           onMoveStop={moveStop}
           onNotesSave={saveNote}
-          onSyncBillExpenses={syncBillExpenses}
+          onOpenSplit={() => handleActiveTabChange('Split')}
+          onSplitChange={applySplitUpdate}
           onToggleChecklistItem={toggleChecklistItem}
           onTripChange={(updated) => setTrip(sortTrip(updated))}
+          billSplit={billSplit}
           trip={trip}
         />
       </ScrollView>
@@ -532,6 +625,7 @@ function TripTabRail({
 
 function ActiveTripTabContent({
   activeTab,
+  billSplit,
   trip,
   canManageTrip,
   notesMinHeight,
@@ -540,7 +634,8 @@ function ActiveTripTabContent({
   onMoveStop,
   onDeleteStop,
   onDeleteActivity,
-  onSyncBillExpenses,
+  onSplitChange,
+  onOpenSplit,
   onTripChange,
   onAddChecklistItem,
   onToggleChecklistItem,
@@ -548,6 +643,7 @@ function ActiveTripTabContent({
   onNotesSave
 }: {
   activeTab: TripDetailTabName;
+  billSplit: BillSplit | null;
   trip: Trip;
   canManageTrip: boolean;
   notesMinHeight: number;
@@ -556,7 +652,8 @@ function ActiveTripTabContent({
   onMoveStop: (stop: Stop, direction: -1 | 1) => void;
   onDeleteStop: (stop: Stop) => void;
   onDeleteActivity: (activity: Activity) => void;
-  onSyncBillExpenses: (expenses: BillExpense[]) => void;
+  onSplitChange: (split: BillSplit) => void;
+  onOpenSplit: () => void;
   onTripChange: (trip: Trip) => void;
   onAddChecklistItem: (label: string, category: string) => Promise<void>;
   onToggleChecklistItem: (item: ChecklistItem) => Promise<void>;
@@ -576,13 +673,13 @@ function ActiveTripTabContent({
         />
       </View>
       <View style={activeTab === 'Budget' ? undefined : styles.hiddenTab}>
-        <BudgetTab trip={trip} />
+        <BudgetTab trip={trip} split={billSplit} onOpenSplit={onOpenSplit} />
       </View>
       <View style={activeTab === 'Split' ? undefined : styles.hiddenTab}>
-        <SplitTab tripId={trip.id} onExpensesChange={onSyncBillExpenses} />
+        <SplitTab tripId={trip.id} splitSnapshot={billSplit} onSplitChange={onSplitChange} />
       </View>
       <View style={activeTab === 'Crew' ? undefined : styles.hiddenTab}>
-        <CrewTab trip={trip} canManage={canManageTrip} onTripChange={onTripChange} />
+        <CrewTab trip={trip} billSplit={billSplit} canManage={canManageTrip} onTripChange={onTripChange} />
       </View>
       <View style={activeTab === 'Checklist' ? undefined : styles.hiddenTab}>
         <ChecklistTab
@@ -843,10 +940,10 @@ function ManageAction({
   );
 }
 
-function BudgetTab({ trip }: { trip: Trip }) {
+function BudgetTab({ trip, split, onOpenSplit }: { trip: Trip; split: BillSplit | null; onOpenSplit: () => void }) {
   const itineraryTotal = calcTotal(trip.stops);
-  const sharedTotal = calcSharedExpenseTotal(trip.billExpenses ?? []);
-  const total = calcTripTotal(trip);
+  const sharedTotal = getSharedSpendTotal(split, trip.billExpenses ?? []);
+  const total = itineraryTotal + sharedTotal;
   const budget = Number(trip.budget ?? 0);
   const percent = budget ? Math.min(100, Math.round((total / budget) * 100)) : 0;
   const budgetDelta = budget - total;
@@ -877,10 +974,11 @@ function BudgetTab({ trip }: { trip: Trip }) {
           <Text style={styles.meta}>Itinerary</Text>
           <Text style={styles.budgetMiniValue}>{formatMoney(itineraryTotal)}</Text>
         </View>
-        <View style={styles.budgetMiniCard}>
+        <Pressable accessibilityRole="button" onPress={onOpenSplit} style={({ pressed }) => [styles.budgetMiniCard, pressed && styles.pressedRow]}>
           <Text style={styles.meta}>Shared bills</Text>
           <Text style={styles.budgetMiniValue}>{formatMoney(sharedTotal)}</Text>
-        </View>
+          <Text style={styles.inlineLinkText}>Manage split</Text>
+        </Pressable>
       </View>
 
       <View style={styles.chartCard}>
@@ -902,42 +1000,83 @@ function BudgetTab({ trip }: { trip: Trip }) {
   );
 }
 
-function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChange: (expenses: BillExpense[]) => void }) {
-  const [split, setSplit] = useState<BillSplit | null>(null);
-  const [loading, setLoading] = useState(true);
+function SplitTab({
+  tripId,
+  splitSnapshot,
+  onSplitChange
+}: {
+  tripId: number;
+  splitSnapshot: BillSplit | null;
+  onSplitChange: (split: BillSplit) => void;
+}) {
+  const { user } = useAuth();
+  const [split, setSplit] = useState<BillSplit | null>(splitSnapshot);
+  const [loading, setLoading] = useState(!splitSnapshot);
   const [saving, setSaving] = useState(false);
   const [participantName, setParticipantName] = useState('');
   const [expenseTitle, setExpenseTitle] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
+  const [expenseCategory, setExpenseCategory] = useState<ActivityCategory>('food');
+  const [expenseNote, setExpenseNote] = useState('');
+  const [splitMode, setSplitMode] = useState<BillSplitMode>('equal');
+  const [selectedSplitIds, setSelectedSplitIds] = useState<number[]>([]);
+  const [shareInputs, setShareInputs] = useState<Record<number, string>>({});
+  const [editingExpense, setEditingExpense] = useState<BillExpense | null>(null);
   const [selectedPayerId, setSelectedPayerId] = useState<number | null>(null);
+  const [showBalances, setShowBalances] = useState(true);
+  const [showSettlementHistory, setShowSettlementHistory] = useState(true);
+
+  const applySplit = useCallback((data: BillSplit) => {
+    setSplit(data);
+    onSplitChange(data);
+  }, [onSplitChange]);
 
   const loadSplit = useCallback(async () => {
     try {
       const data = await billsApi.get(tripId);
-      setSplit(data);
-      onExpensesChange(data.expenses);
-      setSelectedPayerId((current) => current ?? data.participants[0]?.id ?? null);
+      applySplit(data);
+      const activeParticipants = data.participants.filter(isParticipantUsableForNewExpense);
+      setSelectedPayerId((current) => current ?? activeParticipants[0]?.id ?? data.participants[0]?.id ?? null);
+      setSelectedSplitIds((current) => current.length ? current.filter((id) => activeParticipants.some((participant) => participant.id === id)) : activeParticipants.map((participant) => participant.id));
     } catch (error) {
       Toast.show({ type: 'error', text1: 'Could not load split', text2: getErrorMessage(error) });
     } finally {
       setLoading(false);
     }
-  }, [onExpensesChange, tripId]);
+  }, [applySplit, tripId]);
 
   useEffect(() => {
     loadSplit();
   }, [loadSplit]);
 
   useEffect(() => {
-    if (!split?.participants.length) {
+    if (splitSnapshot) {
+      setSplit(splitSnapshot);
+      setLoading(false);
+    }
+  }, [splitSnapshot]);
+
+  useEffect(() => {
+    const activeParticipants = (split?.participants ?? []).filter(isParticipantUsableForNewExpense);
+    if (!activeParticipants.length) {
       setSelectedPayerId(null);
       return;
     }
 
-    if (!selectedPayerId || !split.participants.some((participant) => participant.id === selectedPayerId)) {
-      setSelectedPayerId(split.participants[0].id);
+    if (!selectedPayerId || !activeParticipants.some((participant) => participant.id === selectedPayerId)) {
+      setSelectedPayerId(activeParticipants[0].id);
     }
   }, [selectedPayerId, split?.participants]);
+
+  useEffect(() => {
+    const activeIds = (split?.participants ?? [])
+      .filter(isParticipantUsableForNewExpense)
+      .map((participant) => participant.id);
+    setSelectedSplitIds((current) => {
+      const next = current.filter((id) => activeIds.includes(id));
+      return next.length ? next : activeIds;
+    });
+  }, [split?.participants]);
 
   const addParticipant = async () => {
     const name = participantName.trim();
@@ -946,8 +1085,7 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
     setSaving(true);
     try {
       const data = await billsApi.addParticipant(tripId, { name });
-      setSplit(data);
-      onExpensesChange(data.expenses);
+      applySplit(data);
       setParticipantName('');
       setSelectedPayerId((current) => current ?? data.participants[0]?.id ?? null);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -964,16 +1102,15 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
       return;
     }
 
-    Alert.alert('Remove traveler?', `${participant.name} and expenses they paid will be removed from this split.`, [
+    Alert.alert('Archive traveler?', `${participantDisplayName(participant, user?.id)} will be hidden from new bills but kept in old balances.`, [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Remove',
+        text: 'Archive',
         style: 'destructive',
         onPress: async () => {
           try {
             const data = await billsApi.removeParticipant(participant.id);
-            setSplit(data);
-            onExpensesChange(data.expenses);
+            applySplit(data);
           } catch (error) {
             Toast.show({ type: 'error', text1: 'Could not remove traveler', text2: getErrorMessage(error) });
           }
@@ -982,35 +1119,190 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
     ]);
   };
 
-  const addExpense = async () => {
+  const resetExpenseForm = () => {
+    setEditingExpense(null);
+    setExpenseTitle('');
+    setExpenseAmount('');
+    setExpenseCategory('food');
+    setExpenseNote('');
+    setSplitMode('equal');
+    setShareInputs({});
+    const activeIds = (split?.participants ?? [])
+      .filter(isParticipantUsableForNewExpense)
+      .map((participant) => participant.id);
+    setSelectedSplitIds(activeIds);
+  };
+
+  const beginEditExpense = (expense: BillExpense) => {
+    const nextMode = expense.splitMode ?? 'equal';
+    setEditingExpense(expense);
+    setExpenseTitle(expense.title);
+    setExpenseAmount(String(expense.amountCents ? expense.amountCents / 100 : expense.amount));
+    setExpenseCategory((expense.category as ActivityCategory) || 'food');
+    setExpenseNote(expense.note ?? '');
+    setSelectedPayerId(expense.paidById);
+    setSplitMode(nextMode);
+    const expenseShares = expense.shares ?? [];
+    setSelectedSplitIds(expenseShares.length ? expenseShares.map((share) => share.participantId) : selectedSplitIds);
+    setShareInputs(
+      expenseShares.reduce<Record<number, string>>((acc, share) => {
+        if (nextMode === 'exact') acc[share.participantId] = String((share.amountCents ?? 0) / 100);
+        if (nextMode === 'percent') acc[share.participantId] = String((share.percentBps ?? 0) / 100);
+        if (nextMode === 'shares') acc[share.participantId] = String(share.shares ?? 1);
+        return acc;
+      }, {})
+    );
+  };
+
+  const toggleSplitParticipant = (participantId: number) => {
+    setSelectedSplitIds((current) =>
+      current.includes(participantId)
+        ? current.filter((id) => id !== participantId)
+        : [...current, participantId]
+    );
+  };
+
+  const buildExpensePayload = () => {
     const amount = Number(expenseAmount.replace(/,/g, '').trim());
     const title = expenseTitle.trim();
 
-    if (!title || !selectedPayerId || !Number.isFinite(amount) || amount <= 0 || saving) return;
+    if (!title || !selectedPayerId || !Number.isFinite(amount) || amount <= 0 || !selectedSplitIds.length) return null;
+
+    const amountCents = Math.round(amount * 100);
+    const splitPayload =
+      splitMode === 'equal'
+        ? { mode: splitMode, participantIds: selectedSplitIds }
+        : {
+            mode: splitMode,
+            shares: selectedSplitIds.map((participantId) => {
+              const value = Number((shareInputs[participantId] ?? '').replace(/,/g, '').trim());
+              if (splitMode === 'exact') return { participantId, amountCents: Math.round(value * 100) };
+              if (splitMode === 'percent') return { participantId, percentBps: Math.round(value * 100) };
+              return { participantId, shares: Math.round(value) };
+            })
+          };
+
+    return {
+      title,
+      amount,
+      amountCents,
+      paidById: selectedPayerId,
+      category: expenseCategory,
+      note: expenseNote.trim() || null,
+      split: splitPayload
+    };
+  };
+
+  const getSplitValidationMessage = () => {
+    if (!expenseTitle.trim()) return 'Add a title';
+    const amount = Number(expenseAmount.replace(/,/g, '').trim());
+    if (!Number.isFinite(amount) || amount <= 0) return 'Enter an amount';
+    if (!selectedPayerId) return 'Choose who paid';
+    if (!selectedSplitIds.length) return 'Choose who is included';
+    if (splitMode === 'equal') return null;
+
+    const values = selectedSplitIds.map((id) => Number((shareInputs[id] ?? '').replace(/,/g, '').trim()));
+    if (values.some((value) => !Number.isFinite(value) || value <= 0)) return 'Fill every split value';
+    if (splitMode === 'exact') {
+      const totalCents = values.reduce((sum, value) => sum + Math.round(value * 100), 0);
+      const amountCents = Math.round(amount * 100);
+      if (totalCents !== amountCents) return `Exact split is ${formatMoney(totalCents / 100)} of ${formatMoney(amount)}`;
+    }
+    if (splitMode === 'percent') {
+      const totalBps = values.reduce((sum, value) => sum + Math.round(value * 100), 0);
+      if (totalBps !== 10000) return `Percent split totals ${(totalBps / 100).toFixed(1)}%`;
+    }
+    return null;
+  };
+
+  const saveExpense = async () => {
+    const payload = buildExpensePayload();
+    if (!payload || saving) return;
 
     setSaving(true);
     try {
-      const data = await billsApi.addExpense(tripId, { title, amount, paidById: selectedPayerId });
-      setSplit(data);
-      onExpensesChange(data.expenses);
-      setExpenseTitle('');
-      setExpenseAmount('');
+      const data = editingExpense
+        ? await billsApi.updateExpense(editingExpense.id, payload)
+        : await billsApi.addExpense(tripId, payload);
+      applySplit(data);
+      resetExpenseForm();
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (error) {
-      Toast.show({ type: 'error', text1: 'Could not add expense', text2: getErrorMessage(error) });
+      Toast.show({ type: 'error', text1: editingExpense ? 'Could not save expense' : 'Could not add expense', text2: getErrorMessage(error) });
     } finally {
       setSaving(false);
     }
   };
 
   const removeExpense = async (expense: BillExpense) => {
+    Alert.alert('Delete expense?', `${expense.title} will be removed from balances.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            const data = await billsApi.removeExpense(expense.id);
+            applySplit(data);
+          } catch (error) {
+            Toast.show({ type: 'error', text1: 'Could not remove expense', text2: getErrorMessage(error) });
+          }
+        }
+      }
+    ]);
+  };
+
+  const recordSettlement = async (settlement: BillSettlement) => {
+    if (saving) return;
+    setSaving(true);
     try {
-      const data = await billsApi.removeExpense(expense.id);
-      setSplit(data);
-      onExpensesChange(data.expenses);
+      const data = await billsApi.addSettlement(tripId, {
+        fromParticipantId: settlement.fromParticipantId,
+        toParticipantId: settlement.toParticipantId,
+        amountCents: settlement.amountCents ?? Math.round(settlement.amount * 100)
+      });
+      applySplit(data);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (error) {
-      Toast.show({ type: 'error', text1: 'Could not remove expense', text2: getErrorMessage(error) });
+      Toast.show({ type: 'error', text1: 'Could not record payment', text2: getErrorMessage(error) });
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const removeSettlement = async (settlement: BillSettlement) => {
+    if (!settlement.id) return;
+    try {
+      const data = await billsApi.removeSettlement(settlement.id);
+      applySplit(data);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (error) {
+      Toast.show({ type: 'error', text1: 'Could not remove payment', text2: getErrorMessage(error) });
+    }
+  };
+
+  const clearSettlementHistory = () => {
+    if (!recordedSettlements.length || saving) return;
+
+    Alert.alert('Clear settlement history?', 'Recorded payments will be removed from this trip ledger and balances will recalculate.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Clear History',
+        style: 'destructive',
+        onPress: async () => {
+          setSaving(true);
+          try {
+            const data = await billsApi.clearSettlements(tripId);
+            applySplit(data);
+            await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          } catch (error) {
+            Toast.show({ type: 'error', text1: 'Could not clear payments', text2: getErrorMessage(error) });
+          } finally {
+            setSaving(false);
+          }
+        }
+      }
+    ]);
   };
 
   if (loading) {
@@ -1022,16 +1314,45 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
   }
 
   const participants = split?.participants ?? [];
+  const activeParticipants = participants.filter(isParticipantUsableForNewExpense);
+  const participantById = new Map(participants.map((participant) => [participant.id, participant]));
+  const currentUserId = user?.id;
+  const displayNameForParticipant = (participant: BillParticipant | null | undefined, fallback = 'Traveler') =>
+    participantDisplayName(participant, currentUserId, fallback);
+  const displayNameForParticipantId = (participantId: number, fallback = 'Traveler') =>
+    displayNameForParticipant(participantById.get(participantId), fallback);
   const expenses = split?.expenses ?? [];
+  const recordedSettlements = split?.settlements ?? [];
   const summary = split?.summary;
-  const canAddExpense = Boolean(expenseTitle.trim() && Number(expenseAmount.replace(/,/g, '').trim()) > 0 && selectedPayerId);
+  const validationMessage = getSplitValidationMessage();
+  const canSaveExpense = !validationMessage && !saving;
+  const crewBillParticipants = participants.filter((participant) => isBillCrewParticipant(participant) && !isHistoricalBillParticipant(participant));
+  const splitOnlyParticipants = participants.filter((participant) => !isBillCrewParticipant(participant) && !isHistoricalBillParticipant(participant));
+  const historicalParticipants = participants.filter(isHistoricalBillParticipant);
+  const renderParticipantGroup = (items: BillParticipant[]) => (
+    <View style={styles.participantGrid}>
+      {items.map((participant) => (
+        <Pressable
+          accessibilityRole="button"
+          key={participant.id}
+          onPress={() => removeParticipant(participant)}
+          style={[styles.participantChip, participant.archivedAt && styles.disabled]}
+        >
+          <Text numberOfLines={1} style={styles.participantChipText}>
+            {displayNameForParticipant(participant)} · {billParticipantRoleLabel(participant)}
+          </Text>
+          <Ionicons name={participant.canRemove ? 'close-circle' : 'person-circle-outline'} size={16} color={colors.gray400} />
+        </Pressable>
+      ))}
+    </View>
+  );
 
   return (
     <View style={styles.tabContent}>
       <View style={styles.splitHeroCard}>
         <View style={styles.splitHeroTop}>
           <View>
-            <Text style={styles.meta}>Shared spending</Text>
+            <Text style={styles.meta}>Shared bills</Text>
             <Text style={styles.splitHeroTotal}>{formatMoney(summary?.total ?? 0)}</Text>
           </View>
           <View style={styles.splitIconBadge}>
@@ -1041,29 +1362,64 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
         <View style={styles.splitMetrics}>
           <SplitMetric label="Travelers" value={String(participants.length)} />
           <SplitMetric label="Expenses" value={String(expenses.length)} />
-          <SplitMetric label="Each" value={formatMoney(summary?.perPerson ?? 0)} />
+          <SplitMetric label="Unsettled" value={String(summary?.settlements.length ?? 0)} />
         </View>
       </View>
 
       <View style={styles.splitSection}>
+        <View style={styles.splitSectionTitleRow}>
+          <View style={styles.splitSectionHeader}>
+            <Text style={styles.stopTitle}>Balances</Text>
+            <Text style={styles.meta}>Positive means they should receive money</Text>
+          </View>
+          <Pressable accessibilityRole="button" onPress={() => setShowBalances((current) => !current)} style={styles.sectionTextButton}>
+            <Text style={styles.sectionTextButtonText}>{showBalances ? 'Hide' : 'Show'}</Text>
+          </Pressable>
+        </View>
+        {!showBalances ? (
+          <View style={styles.compactNotice}>
+            <Ionicons name="eye-off-outline" size={18} color={colors.gray600} />
+            <Text style={styles.meta}>Balances are hidden on this screen.</Text>
+          </View>
+        ) : summary?.balances.length ? (
+          summary.balances.map((balance) => (
+            <BalanceRow
+              balance={balance}
+              displayName={displayNameForParticipantId(balance.participantId, balance.name)}
+              key={balance.participantId}
+            />
+          ))
+        ) : (
+          <Text style={styles.body}>Balances appear after the first shared bill.</Text>
+        )}
+      </View>
+
+      <View style={styles.splitSection}>
         <View style={styles.splitSectionHeader}>
-          <Text style={styles.stopTitle}>Travelers</Text>
-          <Text style={styles.meta}>Who is splitting costs · tap to remove</Text>
+          <Text style={styles.stopTitle}>Bill Travelers</Text>
+          <Text style={styles.meta}>Crew mirrors the Crew tab · split-only guests stay in shared bills</Text>
         </View>
 
         {participants.length ? (
-          <View style={styles.participantGrid}>
-            {participants.map((participant) => (
-              <Pressable
-                accessibilityRole="button"
-                key={participant.id}
-                onPress={() => removeParticipant(participant)}
-                style={styles.participantChip}
-              >
-                <Text numberOfLines={1} style={styles.participantChipText}>{participant.name}</Text>
-                <Ionicons name={participant.canRemove ? 'close-circle' : 'person-circle-outline'} size={16} color={colors.gray400} />
-              </Pressable>
-            ))}
+          <View style={styles.billTravelerGroups}>
+            {crewBillParticipants.length ? (
+              <>
+                <Text style={styles.meta}>Crew in shared bills</Text>
+                {renderParticipantGroup(crewBillParticipants)}
+              </>
+            ) : null}
+            {splitOnlyParticipants.length ? (
+              <>
+                <Text style={styles.meta}>Split-only guests</Text>
+                {renderParticipantGroup(splitOnlyParticipants)}
+              </>
+            ) : null}
+            {historicalParticipants.length ? (
+              <>
+                <Text style={styles.meta}>Former or archived</Text>
+                {renderParticipantGroup(historicalParticipants)}
+              </>
+            ) : null}
           </View>
         ) : (
           <Text style={styles.body}>Add the people traveling together before entering expenses.</Text>
@@ -1073,7 +1429,7 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
           <TextInput
             value={participantName}
             onChangeText={setParticipantName}
-            placeholder="Traveler name"
+            placeholder="Split-only traveler name"
             placeholderTextColor={colors.gray400}
             style={[styles.input, styles.inlineInput]}
           />
@@ -1090,8 +1446,8 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
 
       <View style={styles.splitSection}>
         <View style={styles.splitSectionHeader}>
-          <Text style={styles.stopTitle}>Add Expense</Text>
-          <Text style={styles.meta}>Split equally across all travelers</Text>
+          <Text style={styles.stopTitle}>{editingExpense ? 'Edit Expense' : 'Add Expense'}</Text>
+          <Text style={styles.meta}>Choose who paid and how this bill is divided</Text>
         </View>
         <TextInput
           value={expenseTitle}
@@ -1108,8 +1464,23 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
           placeholderTextColor={colors.gray400}
           style={styles.input}
         />
+        <View style={styles.categoryRow}>
+          {ACTIVITY_CATEGORIES.map((item) => (
+            <Pressable key={item} onPress={() => setExpenseCategory(item)} style={[styles.pill, expenseCategory === item && styles.pillActive]}>
+              <Text style={[styles.pillText, expenseCategory === item && styles.pillTextActive]}>{CATEGORY_LABELS[item]}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <TextInput
+          value={expenseNote}
+          onChangeText={setExpenseNote}
+          placeholder="Optional note"
+          placeholderTextColor={colors.gray400}
+          style={styles.input}
+        />
+        <Text style={styles.meta}>Paid by</Text>
         <View style={styles.payerRow}>
-          {participants.map((participant) => (
+          {activeParticipants.map((participant) => (
             <Pressable
               accessibilityRole="button"
               key={participant.id}
@@ -1117,27 +1488,108 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
               style={[styles.payerPill, selectedPayerId === participant.id && styles.payerPillActive]}
             >
               <Text style={[styles.payerPillText, selectedPayerId === participant.id && styles.payerPillTextActive]}>
-                Paid by {participant.name}
+                Paid by {displayNameForParticipant(participant)}
               </Text>
             </Pressable>
           ))}
         </View>
-        <Button label="Add Expense" icon="add-circle-outline" disabled={!canAddExpense || saving} onPress={addExpense} />
+        <Text style={styles.meta}>Included travelers</Text>
+        <View style={styles.participantGrid}>
+          {activeParticipants.map((participant) => {
+            const selected = selectedSplitIds.includes(participant.id);
+            return (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                key={participant.id}
+                onPress={() => toggleSplitParticipant(participant.id)}
+                style={[styles.participantChip, selected && styles.participantChipActive]}
+              >
+                <Text numberOfLines={1} style={[styles.participantChipText, selected && styles.participantChipTextActive]}>{displayNameForParticipant(participant)}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <View style={styles.splitModeRow}>
+          {splitModeOptions.map((mode) => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: splitMode === mode }}
+              key={mode}
+              onPress={() => setSplitMode(mode)}
+              style={[styles.splitModeButton, splitMode === mode && styles.splitModeButtonActive]}
+            >
+              <Text style={[styles.splitModeText, splitMode === mode && styles.splitModeTextActive]}>{splitModeLabels[mode]}</Text>
+            </Pressable>
+          ))}
+        </View>
+        {splitMode !== 'equal' ? (
+          <SplitShareInputs
+            mode={splitMode}
+            participants={activeParticipants.filter((participant) => selectedSplitIds.includes(participant.id))}
+            currentUserId={currentUserId}
+            values={shareInputs}
+            onChange={(participantId, value) => setShareInputs((current) => ({ ...current, [participantId]: value }))}
+          />
+        ) : null}
+        {validationMessage ? <Text style={styles.formHint}>{validationMessage}</Text> : null}
+        <Button label={editingExpense ? 'Save Expense' : 'Add Expense'} icon="add-circle-outline" disabled={!canSaveExpense} loading={saving} onPress={saveExpense} />
+        {editingExpense ? <Button label="Cancel Edit" variant="secondary" onPress={resetExpenseForm} /> : null}
       </View>
 
       <View style={styles.splitSection}>
-        <View style={styles.splitSectionHeader}>
-          <Text style={styles.stopTitle}>Settle Up</Text>
-          <Text style={styles.meta}>Suggested payments</Text>
+        <View style={styles.splitSectionTitleRow}>
+          <View style={styles.splitSectionHeader}>
+            <Text style={styles.stopTitle}>Settle Up</Text>
+            <Text style={styles.meta}>Suggested payments can be recorded</Text>
+          </View>
+          {recordedSettlements.length ? (
+            <View style={styles.sectionActionRow}>
+              <Pressable accessibilityRole="button" onPress={() => setShowSettlementHistory((current) => !current)} style={styles.sectionTextButton}>
+                <Text style={styles.sectionTextButtonText}>{showSettlementHistory ? 'Hide History' : 'Show History'}</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" disabled={saving} onPress={clearSettlementHistory} style={[styles.sectionTextButton, styles.sectionTextButtonDanger, saving && styles.disabled]}>
+                <Text style={[styles.sectionTextButtonText, styles.sectionTextButtonDangerText]}>Clear</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
         {summary?.settlements.length ? (
-          summary.settlements.map((settlement) => <SettlementRow key={`${settlement.fromParticipantId}-${settlement.toParticipantId}`} settlement={settlement} />)
+          summary.settlements.map((settlement) => (
+            <SettlementRow
+              key={`${settlement.fromParticipantId}-${settlement.toParticipantId}`}
+              settlement={settlement}
+              fromName={displayNameForParticipantId(settlement.fromParticipantId, settlement.from)}
+              toName={displayNameForParticipantId(settlement.toParticipantId, settlement.to)}
+              onRecord={() => recordSettlement(settlement)}
+            />
+          ))
         ) : (
           <View style={styles.settledState}>
             <Ionicons name="checkmark-circle-outline" size={22} color={colors.success} />
             <Text style={styles.itemTitle}>Everyone is settled</Text>
           </View>
         )}
+        {recordedSettlements.length && showSettlementHistory ? (
+          <View style={styles.recordedSettlements}>
+            <Text style={styles.meta}>Recorded payments</Text>
+            {recordedSettlements.map((settlement) => (
+              <SettlementRow
+                key={settlement.id ?? `${settlement.fromParticipantId}-${settlement.toParticipantId}-${settlement.amount}`}
+                settlement={settlement}
+                fromName={displayNameForParticipantId(settlement.fromParticipantId, settlement.from)}
+                toName={displayNameForParticipantId(settlement.toParticipantId, settlement.to)}
+                recorded
+                onDelete={() => removeSettlement(settlement)}
+              />
+            ))}
+          </View>
+        ) : recordedSettlements.length ? (
+          <View style={styles.compactNotice}>
+            <Ionicons name="archive-outline" size={18} color={colors.gray600} />
+            <Text style={styles.meta}>{recordedSettlements.length} recorded payment{recordedSettlements.length === 1 ? '' : 's'} hidden.</Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.splitSection}>
@@ -1146,7 +1598,15 @@ function SplitTab({ tripId, onExpensesChange }: { tripId: number; onExpensesChan
           <Text style={styles.meta}>{expenses.length ? 'Shared costs entered for this trip' : 'No expenses yet'}</Text>
         </View>
         {expenses.length ? (
-          expenses.map((expense) => <ExpenseRow expense={expense} key={expense.id} onDelete={() => removeExpense(expense)} />)
+          expenses.map((expense) => (
+            <ExpenseRow
+              expense={expense}
+              paidByName={displayNameForParticipant(expense.paidBy, expense.paidBy?.name ?? 'Traveler')}
+              key={expense.id}
+              onDelete={() => removeExpense(expense)}
+              onEdit={() => beginEditExpense(expense)}
+            />
+          ))
         ) : (
           <EmptyPanel title="No shared costs yet" body="Add the first group expense to see who owes what." compact />
         )}
@@ -1164,19 +1624,106 @@ function SplitMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SettlementRow({ settlement }: { settlement: BillSplit['summary']['settlements'][number] }) {
+function BalanceRow({ balance, displayName }: { balance: BillSplit['summary']['balances'][number]; displayName: string }) {
+  const net = balance.netCents ?? Math.round(balance.amount * 100);
+  const positive = net > 0;
+  const settled = net === 0;
   return (
-    <View style={styles.settlementRow}>
-      <View style={styles.settlementIcon}>
-        <Ionicons name="arrow-forward" size={16} color={colors.primary} />
+    <View style={styles.balanceRow}>
+      <View style={styles.grow}>
+        <Text numberOfLines={1} style={styles.itemTitle}>{displayName}</Text>
+        <Text style={styles.meta}>
+          Paid {formatMoney((balance.paidCents ?? 0) / 100)} · owes {formatMoney((balance.owedCents ?? 0) / 100)}
+        </Text>
       </View>
-      <Text numberOfLines={1} style={styles.itemTitle}>{settlement.from} pays {settlement.to}</Text>
-      <Text style={styles.cost}>{formatMoney(settlement.amount)}</Text>
+      <Text style={[styles.cost, positive && styles.successText, !positive && !settled && styles.dangerBalanceText]}>
+        {settled ? 'Settled' : `${positive ? '+' : '-'}${formatMoney(Math.abs(net) / 100)}`}
+      </Text>
     </View>
   );
 }
 
-function ExpenseRow({ expense, onDelete }: { expense: BillExpense; onDelete: () => void }) {
+function SplitShareInputs({
+  mode,
+  participants,
+  currentUserId,
+  values,
+  onChange
+}: {
+  mode: BillSplitMode;
+  participants: BillParticipant[];
+  currentUserId?: number;
+  values: Record<number, string>;
+  onChange: (participantId: number, value: string) => void;
+}) {
+  const placeholder = mode === 'exact' ? 'Amount' : mode === 'percent' ? 'Percent' : 'Shares';
+  return (
+    <View style={styles.shareInputList}>
+      {participants.map((participant) => (
+        <View key={participant.id} style={styles.shareInputRow}>
+          <Text numberOfLines={1} style={styles.itemTitle}>{participantDisplayName(participant, currentUserId)}</Text>
+          <TextInput
+            value={values[participant.id] ?? ''}
+            onChangeText={(value) => onChange(participant.id, value)}
+            keyboardType="decimal-pad"
+            placeholder={placeholder}
+            placeholderTextColor={colors.gray400}
+            style={[styles.input, styles.shareInput]}
+          />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function SettlementRow({
+  settlement,
+  fromName,
+  toName,
+  recorded,
+  onRecord,
+  onDelete
+}: {
+  settlement: BillSettlement;
+  fromName: string;
+  toName: string;
+  recorded?: boolean;
+  onRecord?: () => void;
+  onDelete?: () => void;
+}) {
+  return (
+    <View style={styles.settlementRow}>
+      <View style={styles.settlementIcon}>
+        <Ionicons name={recorded ? 'checkmark' : 'arrow-forward'} size={16} color={colors.primary} />
+      </View>
+      <Text numberOfLines={1} style={styles.itemTitle}>{fromName} pays {toName}</Text>
+      <Text style={styles.cost}>{formatMoney(settlement.amount)}</Text>
+      {onRecord ? (
+        <Pressable accessibilityRole="button" onPress={onRecord} style={styles.settlementAction}>
+          <Text style={styles.settlementActionText}>Record</Text>
+        </Pressable>
+      ) : null}
+      {onDelete ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="Delete recorded payment" onPress={onDelete} hitSlop={10}>
+          <Ionicons name="trash-outline" size={18} color={colors.gray400} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function ExpenseRow({
+  expense,
+  paidByName,
+  onDelete,
+  onEdit
+}: {
+  expense: BillExpense;
+  paidByName: string;
+  onDelete: () => void;
+  onEdit: () => void;
+}) {
+  const splitLabel = expense.splitMode ? `${splitModeLabels[expense.splitMode] ?? expense.splitMode} split` : 'Equal split';
   return (
     <View style={styles.expenseRow}>
       <View style={styles.expenseIcon}>
@@ -1184,9 +1731,12 @@ function ExpenseRow({ expense, onDelete }: { expense: BillExpense; onDelete: () 
       </View>
       <View style={styles.grow}>
         <Text numberOfLines={1} style={styles.itemTitle}>{expense.title}</Text>
-        <Text numberOfLines={1} style={styles.meta}>Paid by {expense.paidBy?.name ?? 'Traveler'}</Text>
+        <Text numberOfLines={1} style={styles.meta}>Paid by {paidByName} · {splitLabel}</Text>
       </View>
       <Text style={styles.cost}>{formatMoney(expense.amount)}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${expense.title}`} hitSlop={10} onPress={onEdit}>
+        <Ionicons name="create-outline" size={18} color={colors.gray400} />
+      </Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel={`Delete ${expense.title}`} hitSlop={10} onPress={onDelete}>
         <Ionicons name="trash-outline" size={18} color={colors.gray400} />
       </Pressable>
@@ -1196,13 +1746,16 @@ function ExpenseRow({ expense, onDelete }: { expense: BillExpense; onDelete: () 
 
 function CrewTab({
   trip,
+  billSplit,
   canManage,
   onTripChange
 }: {
   trip: Trip;
+  billSplit: BillSplit | null;
   canManage: boolean;
   onTripChange: (trip: Trip) => void;
 }) {
+  const { user: currentUser } = useAuth();
   const [friends, setFriends] = useState<PublicUser[]>([]);
   const [selectedFriendId, setSelectedFriendId] = useState<number | null>(null);
   const [loadingFriends, setLoadingFriends] = useState(false);
@@ -1233,6 +1786,8 @@ function CrewTab({
   const availableFriends = friends.filter((friend) => !unavailableIds.has(friend.id));
   const owner = trip.user;
   const crewUsers = buildCrewUsers(trip);
+  const crewUserIds = new Set(crewUsers.map((crewUser) => crewUser.id));
+  const splitOnlyParticipants = (billSplit?.participants ?? []).filter((participant) => !participant.userId || !crewUserIds.has(participant.userId));
 
   const invite = async () => {
     if (!selectedFriendId || saving) return;
@@ -1352,6 +1907,25 @@ function CrewTab({
           <CrewRow key={`group-${member.id}`} user={member.user} role="Group" />
         ))}
       </View>
+
+      {splitOnlyParticipants.length ? (
+        <View style={styles.splitSection}>
+          <View style={styles.splitSectionHeader}>
+            <Text style={styles.stopTitle}>Split-Only Bill Travelers</Text>
+            <Text style={styles.meta}>These people are included only in shared bills and cannot edit the trip.</Text>
+          </View>
+          <View style={styles.participantGrid}>
+            {splitOnlyParticipants.map((participant) => (
+              <View key={participant.id} style={styles.participantChip}>
+                <Text numberOfLines={1} style={styles.participantChipText}>
+                  {participantDisplayName(participant, currentUser?.id)} · {billParticipantRoleLabel(participant)}
+                </Text>
+                <Ionicons name="receipt-outline" size={16} color={colors.gray400} />
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -2180,6 +2754,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 23
   },
+  inlineLinkText: {
+    color: colors.primary,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 11,
+    lineHeight: 14
+  },
   dangerText: {
     color: '#FCA5A5'
   },
@@ -2265,7 +2845,66 @@ const styles = StyleSheet.create({
     ...shadows.subtle
   },
   splitSectionHeader: {
+    flex: 1,
     gap: 2
+  },
+  splitSectionTitleRow: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10
+  },
+  sectionActionRow: {
+    flexDirection: 'row',
+    flexShrink: 0,
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: 6
+  },
+  sectionTextButton: {
+    minHeight: 32,
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryLight
+  },
+  sectionTextButtonText: {
+    color: colors.primary,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 11,
+    lineHeight: 14
+  },
+  sectionTextButtonDanger: {
+    backgroundColor: colors.dangerSoft
+  },
+  sectionTextButtonDangerText: {
+    color: colors.danger
+  },
+  compactNotice: {
+    minHeight: 48,
+    borderRadius: radius.lg,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.gray50
+  },
+  balanceRow: {
+    minHeight: 58,
+    borderRadius: radius.lg,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.gray50
+  },
+  successText: {
+    color: colors.success
+  },
+  dangerBalanceText: {
+    color: colors.danger
   },
   crewHero: {
     minHeight: 78,
@@ -2377,6 +3016,9 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8
   },
+  billTravelerGroups: {
+    gap: 10
+  },
   participantChip: {
     maxWidth: '100%',
     minHeight: 36,
@@ -2442,6 +3084,52 @@ const styles = StyleSheet.create({
   payerPillTextActive: {
     color: colors.primary
   },
+  splitModeRow: {
+    minHeight: 42,
+    borderRadius: radius.pill,
+    padding: 4,
+    flexDirection: 'row',
+    backgroundColor: colors.gray100,
+    gap: 4
+  },
+  splitModeButton: {
+    flex: 1,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8
+  },
+  splitModeButtonActive: {
+    backgroundColor: colors.primary
+  },
+  splitModeText: {
+    color: colors.gray600,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 12,
+    lineHeight: 16
+  },
+  splitModeTextActive: {
+    color: colors.white
+  },
+  shareInputList: {
+    gap: 8
+  },
+  shareInputRow: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10
+  },
+  shareInput: {
+    width: 112,
+    minHeight: 44
+  },
+  formHint: {
+    color: colors.warning,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 12,
+    lineHeight: 16
+  },
   settlementRow: {
     minHeight: 54,
     borderRadius: radius.lg,
@@ -2458,6 +3146,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.white
+  },
+  settlementAction: {
+    minHeight: 32,
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white
+  },
+  settlementActionText: {
+    color: colors.primary,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 11,
+    lineHeight: 14
+  },
+  recordedSettlements: {
+    gap: 8
   },
   settledState: {
     minHeight: 54,

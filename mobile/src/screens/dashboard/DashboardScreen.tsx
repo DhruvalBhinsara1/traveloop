@@ -5,8 +5,6 @@ import { useCallback, useMemo, useState } from 'react';
 import {
   Image,
   ImageBackground,
-  Pressable,
-  RefreshControl,
   ScrollView,
   StyleSheet,
   StatusBar,
@@ -17,8 +15,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Stop, Trip } from '../../api/types';
+import { HapticPressable as Pressable } from '../../components/HapticPressable';
 import { colors, fontFamily, layout, radius, shadows, typography } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
+import { useStagedRefreshControl } from '../../hooks/useStagedRefreshControl';
 import { useTrips } from '../../hooks/useTrips';
 import { calcStopSubtotal, calcTripTotal, formatMoney } from '../../utils/budgetCalc';
 import { categoryIcon, getDestinationImage } from '../../utils/photos';
@@ -51,6 +51,7 @@ export function DashboardScreen({ navigation }: Props) {
   const topEdgeFill = Math.max(insets.top + 154, 190);
   const bottomEdgeFill = Math.max(insets.bottom + 92, 118);
   const scrollTopInset = Math.max(insets.top, 0);
+  const stagedRefresh = useStagedRefreshControl({ refreshing, onRefresh: refresh });
 
   const sortedTrips = useMemo(() => {
     return [...trips].sort((a, b) => getTripTime(b) - getTripTime(a));
@@ -108,14 +109,17 @@ export function DashboardScreen({ navigation }: Props) {
       <View pointerEvents="none" style={[styles.bottomEdgeFill, { height: bottomEdgeFill }]} />
 
       <ScrollView
-        alwaysBounceVertical={false}
+        alwaysBounceVertical
         contentInsetAdjustmentBehavior="never"
         contentContainerStyle={[
           styles.screenContent,
           { paddingBottom: bottomEdgeFill + 24, paddingTop: 12 }
         ]}
         keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={refresh} />}
+        onMomentumScrollEnd={stagedRefresh.onMomentumScrollEnd}
+        onScroll={stagedRefresh.onScroll}
+        refreshControl={stagedRefresh.refreshControl}
+        scrollEventThrottle={stagedRefresh.scrollEventThrottle}
         showsVerticalScrollIndicator={false}
         style={[styles.scroll, { marginTop: scrollTopInset }]}
       >

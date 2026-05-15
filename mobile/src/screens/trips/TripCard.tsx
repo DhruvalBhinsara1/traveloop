@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ImageBackground, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ImageBackground, StyleSheet, Text, View } from 'react-native';
 
 import type { Trip } from '../../api/types';
+import { HapticPressable as Pressable } from '../../components/HapticPressable';
 import { calcTripTotal, formatMoney } from '../../utils/budgetCalc';
 import { formatDateRange, getTripDays } from '../../utils/dateHelpers';
 import { colors, fonts, radii, spacing } from '../../utils/theme';

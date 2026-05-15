@@ -1,138 +1,69 @@
 import { Router } from 'express';
 
 import { prisma } from '../prisma.js';
-import { asyncHandler, HttpError, publicUserSelect, toInt } from '../utils/http.js';
-import { parseOptionalNumber } from '../utils/validators.js';
+import {
+  billLedgerInclude,
+  canUseParticipantInNewExpense,
+  getActiveTripUserIds,
+  serializeSplit,
+  syncTripBillParticipants,
+  touchTrip
+} from '../utils/billLedger.js';
+import { asyncHandler, HttpError, toInt } from '../utils/http.js';
+import { normalizeAmountCents, resolveExpenseShares, toMoney } from '../utils/splitMath.js';
 import { getAccessibleTrip } from './trips.js';
 
 export const billsRouter = Router();
+export { serializeSplit, syncTripBillParticipants as ensureTripBillParticipants } from '../utils/billLedger.js';
 
-const splitInclude = {
-  billParticipants: { orderBy: { createdAt: 'asc' }, include: { user: { select: publicUserSelect } } },
-  billExpenses: {
-    orderBy: { createdAt: 'desc' },
-    include: { paidBy: true }
+const splitInclude = billLedgerInclude;
+
+const requireSplitPayload = (fn) => {
+  try {
+    return fn();
+  } catch (error) {
+    throw new HttpError(400, error.message);
   }
 };
 
-const toMoney = (cents) => Number((cents / 100).toFixed(2));
+const parseOptionalDate = (value, label) => {
+  if (!value) return new Date();
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new HttpError(400, `${label} must be a valid date`);
+  }
+  return date;
+};
 
-const buildSummary = (participants, expenses) => {
-  const balances = new Map(participants.map((participant) => [participant.id, 0]));
-  let totalCents = 0;
+const compactString = (value, maxLength, label) => {
+  const text = String(value ?? '').trim();
+  if (text.length > maxLength) {
+    throw new HttpError(400, `${label} must be ${maxLength} characters or fewer`);
+  }
+  return text || null;
+};
 
-  expenses.forEach((expense) => {
-    if (!participants.length || !balances.has(expense.paidById)) return;
-
-    const amountCents = Math.round(Number(expense.amount) * 100);
-    totalCents += amountCents;
-
-    const baseShare = Math.floor(amountCents / participants.length);
-    const remainder = amountCents % participants.length;
-
-    participants.forEach((participant, index) => {
-      balances.set(participant.id, balances.get(participant.id) - baseShare - (index < remainder ? 1 : 0));
-    });
-
-    balances.set(expense.paidById, balances.get(expense.paidById) + amountCents);
+const loadSplitTrip = async (tripId) => {
+  const trip = await prisma.trip.findUnique({
+    where: { id: tripId },
+    include: splitInclude
   });
 
-  const namedBalances = participants.map((participant) => ({
-    participantId: participant.id,
-    name: participant.name,
-    amount: toMoney(balances.get(participant.id) ?? 0)
-  }));
-
-  const debtors = namedBalances
-    .filter((balance) => balance.amount < 0)
-    .map((balance) => ({ ...balance, cents: Math.abs(Math.round(balance.amount * 100)) }))
-    .sort((a, b) => b.cents - a.cents);
-
-  const creditors = namedBalances
-    .filter((balance) => balance.amount > 0)
-    .map((balance) => ({ ...balance, cents: Math.round(balance.amount * 100) }))
-    .sort((a, b) => b.cents - a.cents);
-
-  const settlements = [];
-  let debtorIndex = 0;
-  let creditorIndex = 0;
-
-  while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
-    const debtor = debtors[debtorIndex];
-    const creditor = creditors[creditorIndex];
-    const cents = Math.min(debtor.cents, creditor.cents);
-
-    if (cents > 0) {
-      settlements.push({
-        fromParticipantId: debtor.participantId,
-        from: debtor.name,
-        toParticipantId: creditor.participantId,
-        to: creditor.name,
-        amount: toMoney(cents)
-      });
-    }
-
-    debtor.cents -= cents;
-    creditor.cents -= cents;
-
-    if (debtor.cents === 0) debtorIndex += 1;
-    if (creditor.cents === 0) creditorIndex += 1;
+  if (!trip) {
+    throw new HttpError(404, 'Trip not found');
   }
 
-  return {
-    total: toMoney(totalCents),
-    perPerson: participants.length ? toMoney(Math.round(totalCents / participants.length)) : 0,
-    balances: namedBalances,
-    settlements
-  };
+  return trip;
 };
 
-export const getActiveTripUserIds = (trip) => {
-  const activeUserIds = new Set();
-  if (trip.userId) activeUserIds.add(trip.userId);
-  if (trip.user?.id) activeUserIds.add(trip.user.id);
-  trip.members?.forEach((member) => activeUserIds.add(member.userId));
-  trip.group?.members?.forEach((member) => activeUserIds.add(member.userId));
-  return activeUserIds;
+const getAccessibleSplit = async (tripId, userId) => {
+  const accessibleTrip = await getAccessibleTrip(tripId, userId);
+  await syncTripBillParticipants(accessibleTrip);
+  const trip = await loadSplitTrip(tripId);
+  return serializeSplit(trip, getActiveTripUserIds(accessibleTrip));
 };
 
-const serializeParticipant = (participant, activeUserIds) => ({
-  ...participant,
-  canRemove: !participant.userId || !activeUserIds.has(participant.userId)
-});
-
-export const serializeSplit = (trip, activeUserIds = getActiveTripUserIds(trip)) => {
-  const participants = trip.billParticipants.map((participant) => serializeParticipant(participant, activeUserIds));
-  const expenses = trip.billExpenses.map((expense) => ({
-    ...expense,
-    paidBy: expense.paidBy ? serializeParticipant(expense.paidBy, activeUserIds) : expense.paidBy
-  }));
-
-  return {
-    participants,
-    expenses,
-    summary: buildSummary(participants, expenses)
-  };
-};
-
-const ensureTripBillParticipants = async (trip) => {
-  const userEntries = new Map();
-  userEntries.set(trip.user.id, trip.user);
-  trip.members?.forEach((member) => userEntries.set(member.userId, member.user));
-  trip.group?.members?.forEach((member) => userEntries.set(member.userId, member.user));
-
-  await Promise.all(
-    [...userEntries.values()].map((user) =>
-      prisma.billParticipant.upsert({
-        where: { tripId_userId: { tripId: trip.id, userId: user.id } },
-        create: { tripId: trip.id, userId: user.id, name: user.name },
-        update: { name: user.name }
-      })
-    )
-  );
-};
-
-const getOwnedParticipant = async (id, userId) => {
+const getParticipant = async (id, userId) => {
   const participant = await prisma.billParticipant.findFirst({
     where: {
       id,
@@ -153,10 +84,34 @@ const getOwnedParticipant = async (id, userId) => {
   return participant;
 };
 
-const getOwnedExpense = async (id, userId) => {
+const getExpense = async (id, userId) => {
   const expense = await prisma.billExpense.findFirst({
     where: {
       id,
+      deletedAt: null,
+      trip: {
+        OR: [
+          { userId },
+          { members: { some: { userId } } },
+          { group: { members: { some: { userId } } } }
+        ]
+      }
+    },
+    include: { shares: true, payments: true }
+  });
+
+  if (!expense) {
+    throw new HttpError(404, 'Expense not found');
+  }
+
+  return expense;
+};
+
+const getSettlement = async (id, userId) => {
+  const settlement = await prisma.billSettlement.findFirst({
+    where: {
+      id,
+      deletedAt: null,
       trip: {
         OR: [
           { userId },
@@ -167,32 +122,179 @@ const getOwnedExpense = async (id, userId) => {
     }
   });
 
-  if (!expense) {
-    throw new HttpError(404, 'Expense not found');
+  if (!settlement) {
+    throw new HttpError(404, 'Settlement not found');
   }
 
-  return expense;
+  return settlement;
 };
 
-const getOwnedSplit = async (tripId, userId) => {
-  const accessibleTrip = await getAccessibleTrip(tripId, userId);
-  const trip = await prisma.trip.findUnique({
-    where: { id: tripId },
-    include: splitInclude
-  });
+const getParticipantReferenceCount = async (participantId) => {
+  const [legacyPaid, payments, shares, sentSettlements, receivedSettlements] = await Promise.all([
+    prisma.billExpense.count({ where: { paidById: participantId } }),
+    prisma.billExpensePayment.count({ where: { participantId } }),
+    prisma.billExpenseShare.count({ where: { participantId } }),
+    prisma.billSettlement.count({ where: { fromParticipantId: participantId } }),
+    prisma.billSettlement.count({ where: { toParticipantId: participantId } })
+  ]);
 
-  return serializeSplit(trip, getActiveTripUserIds(accessibleTrip));
+  return legacyPaid + payments + shares + sentSettlements + receivedSettlements;
 };
 
-const getAccessibleSplit = async (tripId, userId) => {
-  const accessibleTrip = await getAccessibleTrip(tripId, userId);
-  await ensureTripBillParticipants(accessibleTrip);
-  const trip = await prisma.trip.findUnique({
-    where: { id: tripId },
-    include: splitInclude
+const getExpenseParticipants = async (tripId) => {
+  const participants = await prisma.billParticipant.findMany({
+    where: { tripId },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
   });
 
-  return serializeSplit(trip, getActiveTripUserIds(accessibleTrip));
+  const usableParticipantIds = participants
+    .filter(canUseParticipantInNewExpense)
+    .map((participant) => participant.id);
+
+  return { participants, usableParticipantIds };
+};
+
+const assertParticipantIdsBelongToTrip = (participantIds, participants, existingAllowedIds = new Set()) => {
+  const allowedIds = new Set(
+    participants
+      .filter((participant) => canUseParticipantInNewExpense(participant) || existingAllowedIds.has(participant.id))
+      .map((participant) => participant.id)
+  );
+  const invalidId = participantIds.find((id) => !allowedIds.has(id));
+  if (invalidId) {
+    throw new HttpError(400, 'Split travelers must belong to this trip and be active');
+  }
+};
+
+const getFallbackAmountCents = (expense) => {
+  if (!expense) return undefined;
+  if (Number.isInteger(expense.amountCents) && expense.amountCents > 0) return expense.amountCents;
+  return Math.round(Number(expense.amount ?? 0) * 100);
+};
+
+const normalizeExistingShares = (shares = []) =>
+  shares.map((share) => ({
+    participantId: share.participantId,
+    amountCents: share.amountCents,
+    percentBps: share.percentBps ?? null,
+    shares: share.shares ?? null
+  }));
+
+const buildRecalculatedSplitInput = (fallbackExpense, participantIds) => {
+  const mode = fallbackExpense.splitMode ?? 'equal';
+  const existingShares = fallbackExpense.shares ?? [];
+
+  if (mode === 'exact') {
+    throw new HttpError(400, 'Exact split shares are required when changing the expense amount');
+  }
+
+  if (mode === 'percent') {
+    return {
+      mode,
+      shares: existingShares.map((share) => ({
+        participantId: share.participantId,
+        percentBps: share.percentBps
+      }))
+    };
+  }
+
+  if (mode === 'shares') {
+    return {
+      mode,
+      shares: existingShares.map((share) => ({
+        participantId: share.participantId,
+        shares: share.shares
+      }))
+    };
+  }
+
+  return { mode: 'equal', participantIds };
+};
+
+const resolveExpensePayload = async (trip, body, fallbackExpense = null) => {
+  const title = String(body.title ?? fallbackExpense?.title ?? '').trim();
+  if (!title) {
+    throw new HttpError(400, 'Expense title is required');
+  }
+  if (title.length > 60) {
+    throw new HttpError(400, 'Expense title must be 60 characters or fewer');
+  }
+
+  const fallbackAmountCents = getFallbackAmountCents(fallbackExpense);
+  const amountCents = body.amountCents !== undefined || body.amount !== undefined
+    ? requireSplitPayload(() => normalizeAmountCents({ amountCents: body.amountCents, amount: body.amount }, 'Expense amount'))
+    : fallbackAmountCents;
+  if (!Number.isInteger(amountCents) || amountCents <= 0) {
+    throw new HttpError(400, 'Expense amount must be greater than 0');
+  }
+
+  const paidById = body.paidById !== undefined ? toInt(body.paidById, 'paidById') : fallbackExpense?.paidById;
+  if (!paidById) {
+    throw new HttpError(400, 'Paid by traveler is required');
+  }
+
+  const { participants, usableParticipantIds } = await getExpenseParticipants(trip.id);
+  const existingAllowedIds = new Set([
+    ...(fallbackExpense?.paidById ? [fallbackExpense.paidById] : []),
+    ...(fallbackExpense?.shares ?? []).map((share) => share.participantId)
+  ]);
+  const paidBy = participants.find(
+    (participant) =>
+      participant.id === paidById &&
+      (canUseParticipantInNewExpense(participant) || (fallbackExpense && participant.id === fallbackExpense.paidById))
+  );
+  if (!paidBy) {
+    throw new HttpError(400, 'Paid by traveler must belong to this trip and be active');
+  }
+
+  const fallbackParticipantIds = fallbackExpense?.shares?.length
+    ? fallbackExpense.shares.map((share) => share.participantId)
+    : usableParticipantIds;
+  const amountChanged = Boolean(fallbackExpense) && amountCents !== fallbackAmountCents;
+  let resolvedSplit;
+  if (fallbackExpense && body.split === undefined && !amountChanged) {
+    resolvedSplit = {
+      mode: fallbackExpense.splitMode ?? 'equal',
+      shares: fallbackExpense.shares?.length
+        ? normalizeExistingShares(fallbackExpense.shares)
+        : requireSplitPayload(() =>
+            resolveExpenseShares({
+              amountCents,
+              split: { mode: 'equal', participantIds: fallbackParticipantIds },
+              defaultParticipantIds: usableParticipantIds
+            })
+          ).shares
+    };
+  } else {
+    const splitInput = body.split ?? (fallbackExpense
+      ? buildRecalculatedSplitInput(fallbackExpense, fallbackParticipantIds)
+      : { mode: 'equal', participantIds: usableParticipantIds });
+    resolvedSplit = requireSplitPayload(() =>
+      resolveExpenseShares({
+        amountCents,
+        split: splitInput,
+        defaultParticipantIds: usableParticipantIds
+      })
+    );
+  }
+  assertParticipantIdsBelongToTrip(resolvedSplit.shares.map((share) => share.participantId), participants, existingAllowedIds);
+
+  const category = compactString(body.category ?? fallbackExpense?.category, 32, 'Expense category');
+  const note = compactString(body.note ?? fallbackExpense?.note, 500, 'Expense note');
+  const paidAt = body.paidAt !== undefined ? parseOptionalDate(body.paidAt, 'Paid at') : fallbackExpense?.paidAt ?? new Date();
+
+  return {
+    title,
+    amountCents,
+    amount: toMoney(amountCents),
+    paidById,
+    paidAt,
+    category,
+    note,
+    splitMode: resolvedSplit.mode,
+    shares: resolvedSplit.shares,
+    currency: trip.currency ?? 'USD'
+  };
 };
 
 billsRouter.get('/trips/:tripId/splits', asyncHandler(async (req, res) => {
@@ -211,67 +313,250 @@ billsRouter.post('/trips/:tripId/splits/participants', asyncHandler(async (req, 
     throw new HttpError(400, 'Traveler name must be 40 characters or fewer');
   }
 
-  await prisma.billParticipant.create({
-    data: {
-      name,
-      tripId: trip.id
-    }
+  await prisma.$transaction(async (tx) => {
+    await tx.billParticipant.create({
+      data: {
+        name,
+        tripId: trip.id,
+        status: 'guest'
+      }
+    });
+    await touchTrip(tx, trip.id);
   });
 
-  res.status(201).json(await getOwnedSplit(trip.id, req.user.id));
+  res.status(201).json(await getAccessibleSplit(trip.id, req.user.id));
 }));
 
 billsRouter.delete('/splits/participants/:id', asyncHandler(async (req, res) => {
-  const participant = await getOwnedParticipant(toInt(req.params.id), req.user.id);
+  const participant = await getParticipant(toInt(req.params.id), req.user.id);
   const trip = await getAccessibleTrip(participant.tripId, req.user.id);
   const activeUserIds = getActiveTripUserIds(trip);
+
   if (participant.userId && activeUserIds.has(participant.userId)) {
     throw new HttpError(400, 'Trip members cannot be removed from split participants');
   }
-  await prisma.billParticipant.delete({ where: { id: participant.id } });
-  res.json(await getOwnedSplit(participant.tripId, req.user.id));
+
+  const referenceCount = await getParticipantReferenceCount(participant.id);
+  if (referenceCount > 0 || participant.userId) {
+    await prisma.$transaction(async (tx) => {
+      await tx.billParticipant.update({
+        where: { id: participant.id },
+        data: {
+          status: participant.userId ? 'former' : 'archived',
+          archivedAt: new Date()
+        }
+      });
+      await touchTrip(tx, participant.tripId);
+    });
+  } else {
+    await prisma.$transaction(async (tx) => {
+      await tx.billParticipant.delete({ where: { id: participant.id } });
+      await touchTrip(tx, participant.tripId);
+    });
+  }
+
+  res.json(await getAccessibleSplit(participant.tripId, req.user.id));
 }));
 
 billsRouter.post('/trips/:tripId/splits/expenses', asyncHandler(async (req, res) => {
   const trip = await getAccessibleTrip(toInt(req.params.tripId, 'tripId'), req.user.id);
-  const title = String(req.body.title ?? '').trim();
-  const amount = parseOptionalNumber(req.body.amount, 'Expense amount');
-  const paidById = toInt(req.body.paidById, 'paidById');
+  await syncTripBillParticipants(trip);
+  const payload = await resolveExpensePayload(trip, req.body);
 
-  if (!title) {
-    throw new HttpError(400, 'Expense title is required');
-  }
+  await prisma.$transaction(async (tx) => {
+    const expense = await tx.billExpense.create({
+      data: {
+        title: payload.title,
+        amount: payload.amount,
+        amountCents: payload.amountCents,
+        currency: payload.currency,
+        splitMode: payload.splitMode,
+        category: payload.category,
+        note: payload.note,
+        paidAt: payload.paidAt,
+        paidById: payload.paidById,
+        tripId: trip.id,
+        createdByUserId: req.user.id,
+        updatedByUserId: req.user.id
+      }
+    });
 
-  if (title.length > 60) {
-    throw new HttpError(400, 'Expense title must be 60 characters or fewer');
-  }
+    await tx.billExpensePayment.create({
+      data: {
+        expenseId: expense.id,
+        participantId: payload.paidById,
+        amountCents: payload.amountCents
+      }
+    });
 
-  if (amount <= 0) {
-    throw new HttpError(400, 'Expense amount must be greater than 0');
-  }
-
-  const participant = await prisma.billParticipant.findFirst({
-    where: { id: paidById, tripId: trip.id }
+    await tx.billExpenseShare.createMany({
+      data: payload.shares.map((share) => ({
+        expenseId: expense.id,
+        participantId: share.participantId,
+        amountCents: share.amountCents,
+        percentBps: share.percentBps ?? null,
+        shares: share.shares ?? null
+      }))
+    });
+    await touchTrip(tx, trip.id);
   });
 
-  if (!participant) {
-    throw new HttpError(400, 'Paid by traveler must belong to this trip');
-  }
+  res.status(201).json(await getAccessibleSplit(trip.id, req.user.id));
+}));
 
-  await prisma.billExpense.create({
-    data: {
-      title,
-      amount,
-      paidById,
-      tripId: trip.id
-    }
+billsRouter.patch('/splits/expenses/:id', asyncHandler(async (req, res) => {
+  const expense = await getExpense(toInt(req.params.id), req.user.id);
+  const trip = await getAccessibleTrip(expense.tripId, req.user.id);
+  const payload = await resolveExpensePayload(trip, req.body, expense);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.billExpense.update({
+      where: { id: expense.id },
+      data: {
+        title: payload.title,
+        amount: payload.amount,
+        amountCents: payload.amountCents,
+        currency: payload.currency,
+        splitMode: payload.splitMode,
+        category: payload.category,
+        note: payload.note,
+        paidAt: payload.paidAt,
+        paidById: payload.paidById,
+        updatedByUserId: req.user.id
+      }
+    });
+
+    await tx.billExpensePayment.deleteMany({ where: { expenseId: expense.id } });
+    await tx.billExpenseShare.deleteMany({ where: { expenseId: expense.id } });
+
+    await tx.billExpensePayment.create({
+      data: {
+        expenseId: expense.id,
+        participantId: payload.paidById,
+        amountCents: payload.amountCents
+      }
+    });
+
+    await tx.billExpenseShare.createMany({
+      data: payload.shares.map((share) => ({
+        expenseId: expense.id,
+        participantId: share.participantId,
+        amountCents: share.amountCents,
+        percentBps: share.percentBps ?? null,
+        shares: share.shares ?? null
+      }))
+    });
+    await touchTrip(tx, trip.id);
   });
 
-  res.status(201).json(await getOwnedSplit(trip.id, req.user.id));
+  res.json(await getAccessibleSplit(trip.id, req.user.id));
 }));
 
 billsRouter.delete('/splits/expenses/:id', asyncHandler(async (req, res) => {
-  const expense = await getOwnedExpense(toInt(req.params.id), req.user.id);
-  await prisma.billExpense.delete({ where: { id: expense.id } });
-  res.json(await getOwnedSplit(expense.tripId, req.user.id));
+  const expense = await getExpense(toInt(req.params.id), req.user.id);
+  await prisma.$transaction(async (tx) => {
+    await tx.billExpense.update({
+      where: { id: expense.id },
+      data: {
+        deletedAt: new Date(),
+        deletedByUserId: req.user.id
+      }
+    });
+    await touchTrip(tx, expense.tripId);
+  });
+  res.json(await getAccessibleSplit(expense.tripId, req.user.id));
+}));
+
+const createSettlement = async (tripId, userId, body) => {
+  const trip = await getAccessibleTrip(tripId, userId);
+  await syncTripBillParticipants(trip);
+  const amountCents = requireSplitPayload(() => normalizeAmountCents({ amountCents: body.amountCents, amount: body.amount }, 'Settlement amount'));
+  if (amountCents <= 0) {
+    throw new HttpError(400, 'Settlement amount must be greater than 0');
+  }
+
+  const fromParticipantId = toInt(body.fromParticipantId, 'fromParticipantId');
+  const toParticipantId = toInt(body.toParticipantId, 'toParticipantId');
+  if (fromParticipantId === toParticipantId) {
+    throw new HttpError(400, 'Settlement travelers must be different');
+  }
+
+  const participants = await prisma.billParticipant.findMany({
+    where: { tripId: trip.id, id: { in: [fromParticipantId, toParticipantId] } }
+  });
+  if (participants.length !== 2) {
+    throw new HttpError(400, 'Settlement travelers must belong to this trip');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.billSettlement.create({
+      data: {
+        tripId: trip.id,
+        fromParticipantId,
+        toParticipantId,
+        amountCents,
+        currency: trip.currency ?? 'USD',
+        settledAt: parseOptionalDate(body.settledAt, 'Settled at'),
+        note: compactString(body.note, 500, 'Settlement note'),
+        recordedByUserId: userId
+      }
+    });
+    await touchTrip(tx, trip.id);
+  });
+
+  return getAccessibleSplit(trip.id, userId);
+};
+
+const clearSettlementHistory = async (tripId, userId) => {
+  const trip = await getAccessibleTrip(tripId, userId);
+  await prisma.$transaction(async (tx) => {
+    await tx.billSettlement.updateMany({
+      where: { tripId: trip.id, deletedAt: null },
+      data: { deletedAt: new Date() }
+    });
+    await touchTrip(tx, trip.id);
+  });
+
+  return getAccessibleSplit(trip.id, userId);
+};
+
+billsRouter.post('/trips/:tripId/splits/settlements', asyncHandler(async (req, res) => {
+  res.status(201).json(await createSettlement(toInt(req.params.tripId, 'tripId'), req.user.id, req.body));
+}));
+
+billsRouter.post('/splits/settlements', asyncHandler(async (req, res) => {
+  res.status(201).json(await createSettlement(toInt(req.body.tripId, 'tripId'), req.user.id, req.body));
+}));
+
+billsRouter.delete('/splits/settlements/:id', asyncHandler(async (req, res) => {
+  const settlement = await getSettlement(toInt(req.params.id), req.user.id);
+  await prisma.$transaction(async (tx) => {
+    await tx.billSettlement.update({
+      where: { id: settlement.id },
+      data: { deletedAt: new Date() }
+    });
+    await touchTrip(tx, settlement.tripId);
+  });
+  res.json(await getAccessibleSplit(settlement.tripId, req.user.id));
+}));
+
+billsRouter.delete('/trips/:tripId/splits/settlements/:id', asyncHandler(async (req, res) => {
+  const settlement = await getSettlement(toInt(req.params.id), req.user.id);
+  const tripId = toInt(req.params.tripId, 'tripId');
+  if (settlement.tripId !== tripId) {
+    throw new HttpError(404, 'Settlement not found');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.billSettlement.update({
+      where: { id: settlement.id },
+      data: { deletedAt: new Date() }
+    });
+    await touchTrip(tx, settlement.tripId);
+  });
+  res.json(await getAccessibleSplit(settlement.tripId, req.user.id));
+}));
+
+billsRouter.delete('/trips/:tripId/splits/settlements', asyncHandler(async (req, res) => {
+  res.json(await clearSettlementHistory(toInt(req.params.tripId, 'tripId'), req.user.id));
 }));

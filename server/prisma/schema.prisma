@@ -24,6 +24,10 @@ model User {
   groupMemberships        FriendGroupMember[]
   tripMemberships         TripMember[]
   billParticipants        BillParticipant[]
+  createdBillExpenses     BillExpense[]       @relation("BillExpenseCreatedBy")
+  updatedBillExpenses     BillExpense[]       @relation("BillExpenseUpdatedBy")
+  deletedBillExpenses     BillExpense[]       @relation("BillExpenseDeletedBy")
+  recordedBillSettlements BillSettlement[]    @relation("BillSettlementRecordedBy")
 }
 
 model Trip {
@@ -32,6 +36,7 @@ model Trip {
   description String?
   coverImage  String?
   budget      Float?
+  currency    String    @default("USD")
   startDate   DateTime
   endDate     DateTime
   isPublic    Boolean   @default(false)
@@ -48,6 +53,7 @@ model Trip {
   notes       Note[]
   billParticipants BillParticipant[]
   billExpenses     BillExpense[]
+  billSettlements  BillSettlement[]
 
   @@index([userId])
   @@index([groupId])
@@ -169,30 +175,109 @@ model Note {
 }
 
 model BillParticipant {
-  id           Int           @id @default(autoincrement())
-  name         String
-  createdAt    DateTime      @default(now())
-  tripId       Int
-  userId       Int?
-  trip         Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
-  paidExpenses BillExpense[]
+  id                  Int                  @id @default(autoincrement())
+  name                String
+  status              String               @default("active")
+  archivedAt          DateTime?
+  createdAt           DateTime             @default(now())
+  tripId              Int
+  userId              Int?
+  trip                Trip                 @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user                User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  paidExpenses        BillExpense[]        @relation("LegacyPaidExpenses")
+  expensePayments     BillExpensePayment[]
+  expenseShares       BillExpenseShare[]
+  settlementsSent     BillSettlement[]     @relation("SettlementFromParticipant")
+  settlementsReceived BillSettlement[]     @relation("SettlementToParticipant")
 
   @@index([tripId])
+  @@index([tripId, archivedAt])
   @@index([userId])
   @@unique([tripId, userId])
 }
 
 model BillExpense {
-  id        Int             @id @default(autoincrement())
-  title     String
-  amount    Float
-  createdAt DateTime        @default(now())
-  tripId    Int
-  paidById  Int
-  trip      Trip            @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  paidBy    BillParticipant @relation(fields: [paidById], references: [id], onDelete: Cascade)
+  id              Int                  @id @default(autoincrement())
+  title           String
+  amount          Float
+  amountCents     Int                  @default(0)
+  currency        String               @default("USD")
+  splitMode       String               @default("equal")
+  category        String?
+  note            String?
+  paidAt          DateTime             @default(now())
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @default(now()) @updatedAt
+  deletedAt       DateTime?
+  tripId          Int
+  paidById        Int
+  createdByUserId Int?
+  updatedByUserId Int?
+  deletedByUserId Int?
+  trip            Trip                 @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  paidBy          BillParticipant      @relation("LegacyPaidExpenses", fields: [paidById], references: [id], onDelete: Restrict)
+  createdBy       User?                @relation("BillExpenseCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy       User?                @relation("BillExpenseUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  deletedBy       User?                @relation("BillExpenseDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  payments        BillExpensePayment[]
+  shares          BillExpenseShare[]
 
   @@index([tripId])
+  @@index([tripId, createdAt])
+  @@index([tripId, deletedAt])
+  @@index([tripId, currency])
   @@index([paidById])
+  @@index([createdByUserId])
+}
+
+model BillExpensePayment {
+  id            Int             @id @default(autoincrement())
+  amountCents   Int
+  createdAt     DateTime        @default(now())
+  expenseId     Int
+  participantId Int
+  expense       BillExpense     @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  participant   BillParticipant @relation(fields: [participantId], references: [id], onDelete: Restrict)
+
+  @@unique([expenseId, participantId])
+  @@index([participantId])
+}
+
+model BillExpenseShare {
+  id            Int             @id @default(autoincrement())
+  amountCents   Int
+  percentBps    Int?
+  shares        Int?
+  createdAt     DateTime        @default(now())
+  expenseId     Int
+  participantId Int
+  expense       BillExpense     @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  participant   BillParticipant @relation(fields: [participantId], references: [id], onDelete: Restrict)
+
+  @@unique([expenseId, participantId])
+  @@index([participantId])
+}
+
+model BillSettlement {
+  id                  Int             @id @default(autoincrement())
+  amountCents         Int
+  currency            String          @default("USD")
+  note                String?
+  settledAt           DateTime        @default(now())
+  createdAt           DateTime        @default(now())
+  deletedAt           DateTime?
+  tripId              Int
+  fromParticipantId   Int
+  toParticipantId     Int
+  recordedByUserId    Int?
+  trip                Trip            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  fromParticipant     BillParticipant @relation("SettlementFromParticipant", fields: [fromParticipantId], references: [id], onDelete: Restrict)
+  toParticipant       BillParticipant @relation("SettlementToParticipant", fields: [toParticipantId], references: [id], onDelete: Restrict)
+  recordedBy          User?           @relation("BillSettlementRecordedBy", fields: [recordedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tripId])
+  @@index([tripId, deletedAt])
+  @@index([fromParticipantId])
+  @@index([toParticipantId])
+  @@index([recordedByUserId])
 }

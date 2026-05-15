@@ -2,7 +2,6 @@ import React from 'react';
 import {
   Image,
   ImageSourcePropType,
-  Pressable,
   StyleProp,
   StyleSheet,
   Text,
@@ -11,6 +10,7 @@ import {
 } from 'react-native';
 
 import { colors, radius, shadows, spacing, typography } from '../theme';
+import { HapticPressable as Pressable } from './HapticPressable';
 import { ProgressBar } from './ProgressBar';
 
 export type TripCardStatus = 'planning' | 'booked' | 'live' | 'complete';

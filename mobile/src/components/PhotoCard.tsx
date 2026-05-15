@@ -4,7 +4,6 @@ import {
   ImageBackground,
   ImageSourcePropType,
   ImageStyle,
-  Pressable,
   StyleProp,
   StyleSheet,
   Text,
@@ -13,6 +12,7 @@ import {
 } from 'react-native';
 
 import { colors, layout, radius, shadows, spacing, typography } from '../theme';
+import { HapticPressable as Pressable } from './HapticPressable';
 
 export type PhotoCardProps = {
   image: ImageSourcePropType;

@@ -64,6 +64,17 @@ Notes:
 - `PUT /api/notes/:id`
 - `DELETE /api/notes/:id`
 
+Shared bills:
+
+- `GET /api/trips/:tripId/splits`
+- `POST /api/trips/:tripId/splits/participants`
+- `DELETE /api/splits/participants/:id`
+- `POST /api/trips/:tripId/splits/expenses`
+- `PATCH /api/splits/expenses/:id`
+- `DELETE /api/splits/expenses/:id`
+- `POST /api/trips/:tripId/splits/settlements`
+- `DELETE /api/splits/settlements/:id`
+
 Public:
 
 - `GET /api/public/:shareToken`

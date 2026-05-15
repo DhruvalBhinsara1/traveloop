@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { Activity, ChecklistItem, PublicTripActivity, Stop } from '../api/types';
 import { colors, shadows, typography } from '../theme';
 import { formatDateRange, nightsBetween } from '../utils/dateHelpers';
 import { IconButton } from './Button';
+import { HapticPressable as Pressable } from './HapticPressable';
 import { ProgressBar } from './ProgressBar';
 import { categoryIcon } from './photoUtils';
 

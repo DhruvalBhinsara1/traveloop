@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { getErrorMessage } from '../api/client';
 import { tripsApi } from '../api/trips';
@@ -48,6 +49,14 @@ export function useTrips({ autoRefresh = false, refreshIntervalMs = 10000 }: Use
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!autoRefresh) return undefined;
+      void refresh({ silent: true });
+      return undefined;
+    }, [autoRefresh, refresh])
+  );
 
   useFocusedAutoRefresh(() => refresh({ silent: true }), {
     enabled: autoRefresh,

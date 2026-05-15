@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { socialApi } from '../../api/social';
 import { FriendGroup, PublicUser, Trip, TripInput } from '../../api/types';
 import { BottomSheet } from '../../components/BottomSheet';
 import { Button } from '../../components/Button';
+import { HapticPressable as Pressable } from '../../components/HapticPressable';
 import { InputField } from '../../components/InputField';
 import { colors, typography } from '../../theme';
 import { todayIso } from '../../utils/dateHelpers';

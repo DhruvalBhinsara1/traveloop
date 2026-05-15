@@ -38,7 +38,9 @@ export const calcTotal = (stops: CostedStop[] = []) =>
   stops.flatMap((stop) => stop.activities ?? []).reduce((sum, activity) => sum + Number(activity.cost || 0), 0);
 
 export const calcSharedExpenseTotal = (expenses: BillExpense[] = []) =>
-  expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  expenses
+    .filter((expense) => !expense.deletedAt)
+    .reduce((sum, expense) => sum + (Number.isFinite(expense.amountCents) ? Number(expense.amountCents) / 100 : Number(expense.amount || 0)), 0);
 
 export const calcTripTotal = (trip?: Trip | null) =>
   calcTotal(trip?.stops ?? []) + calcSharedExpenseTotal(trip?.billExpenses ?? []);

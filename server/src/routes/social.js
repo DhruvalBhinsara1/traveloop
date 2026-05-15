@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { prisma } from '../prisma.js';
+import { syncTripBillParticipants, touchTrip } from '../utils/billLedger.js';
 import { asyncHandler, HttpError, publicUserSelect, sanitizePublicUser, toInt } from '../utils/http.js';
 import { canonicalFriendPair, ensureFriends, getFriendIds, getFriends, serializeFriend } from '../utils/social.js';
 import { normalizeUsername } from '../utils/validators.js';
@@ -287,7 +288,14 @@ groupsRouter.patch('/:id', asyncHandler(async (req, res) => {
 
 groupsRouter.delete('/:id', asyncHandler(async (req, res) => {
   const group = await getOwnedGroup(toInt(req.params.id), req.user.id);
+  const trips = await prisma.trip.findMany({ where: { groupId: group.id }, select: { id: true } });
   await prisma.friendGroup.delete({ where: { id: group.id } });
+  await Promise.all(
+    trips.map(async (trip) => {
+      await syncTripBillParticipants(trip.id);
+      await touchTrip(prisma, trip.id);
+    })
+  );
   res.json({ success: true });
 }));
 
@@ -295,7 +303,6 @@ groupsRouter.post('/:id/members', asyncHandler(async (req, res) => {
   const group = await getOwnedGroup(toInt(req.params.id), req.user.id);
   const userId = toInt(req.body.userId, 'userId');
   await ensureFriends(req.user.id, userId);
-
   const updated = await prisma.friendGroup.update({
     where: { id: group.id },
     data: {
@@ -309,6 +316,14 @@ groupsRouter.post('/:id/members', asyncHandler(async (req, res) => {
     include: groupInclude
   });
 
+  const trips = await prisma.trip.findMany({ where: { groupId: group.id }, select: { id: true } });
+  await Promise.all(
+    trips.map(async (trip) => {
+      await syncTripBillParticipants(trip.id);
+      await touchTrip(prisma, trip.id);
+    })
+  );
+
   res.status(201).json(serializeGroup(updated));
 }));
 
@@ -317,5 +332,12 @@ groupsRouter.delete('/:id/members/:userId', asyncHandler(async (req, res) => {
   const userId = toInt(req.params.userId, 'userId');
 
   await prisma.friendGroupMember.deleteMany({ where: { groupId: group.id, userId } });
+  const trips = await prisma.trip.findMany({ where: { groupId: group.id }, select: { id: true } });
+  await Promise.all(
+    trips.map(async (trip) => {
+      await syncTripBillParticipants(trip.id);
+      await touchTrip(prisma, trip.id);
+    })
+  );
   res.json(serializeGroup(await getOwnedGroup(group.id, req.user.id)));
 }));

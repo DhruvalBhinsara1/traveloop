@@ -2,7 +2,6 @@ import { ReactNode } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
-  RefreshControl,
   SafeAreaView,
   ScrollView,
   ScrollViewProps,
@@ -16,6 +15,7 @@ import {
 } from 'react-native';
 
 import { colors, layout } from '../theme';
+import { useStagedRefreshControl } from '../hooks/useStagedRefreshControl';
 
 export type ScreenProps = Omit<ViewProps, 'children'> & {
   children: ReactNode;
@@ -52,6 +52,13 @@ export function Screen({
 }: ScreenProps) {
   const Container = safeArea ? SafeAreaView : View;
   const shouldScroll = scroll ?? scrollable ?? true;
+  const stagedRefresh = useStagedRefreshControl({
+    enabled: Boolean(onRefresh),
+    onMomentumScrollEnd: scrollProps?.onMomentumScrollEnd,
+    onRefresh,
+    onScroll: scrollProps?.onScroll,
+    refreshing
+  });
   const contentStyle = [
     styles.content,
     padded && styles.padded,
@@ -61,17 +68,16 @@ export function Screen({
 
   const body = shouldScroll ? (
     <ScrollView
-      alwaysBounceVertical={false}
+      {...scrollProps}
+      alwaysBounceVertical={scrollProps?.alwaysBounceVertical ?? Boolean(onRefresh)}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
       style={styles.flex}
       contentContainerStyle={contentStyle}
-      refreshControl={
-        onRefresh ? (
-          <RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />
-        ) : undefined
-      }
-      {...scrollProps}
+      onMomentumScrollEnd={stagedRefresh.onMomentumScrollEnd}
+      onScroll={stagedRefresh.onScroll}
+      refreshControl={stagedRefresh.refreshControl ?? scrollProps?.refreshControl}
+      scrollEventThrottle={scrollProps?.scrollEventThrottle ?? stagedRefresh.scrollEventThrottle}
     >
       {children}
     </ScrollView>

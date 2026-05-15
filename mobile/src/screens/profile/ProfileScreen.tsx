@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, StyleSheet, Text, View } from 'react-native';
 import Toast from 'react-native-toast-message';
 
 import { getErrorMessage } from '../../api/client';
 import { BottomSheet } from '../../components/BottomSheet';
 import { Button } from '../../components/Button';
+import { HapticPressable as Pressable } from '../../components/HapticPressable';
 import { InputField } from '../../components/InputField';
 import { Screen } from '../../components/Screen';
 import { useAuth } from '../../context/AuthContext';

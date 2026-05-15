@@ -4,6 +4,7 @@ import { v4 as uuid } from 'uuid';
 
 import { prisma } from '../prisma.js';
 import { isAllowedImageMimeType, uploadTripCover } from '../utils/cloudStorage.js';
+import { serializeTripWithBills, syncTripBillParticipants, touchTrip, tripBillInclude } from '../utils/billLedger.js';
 import { asyncHandler, HttpError, publicUserSelect, toInt } from '../utils/http.js';
 import { ensureFriends } from '../utils/social.js';
 import { validateTrip } from '../utils/validators.js';
@@ -35,7 +36,7 @@ export const nestedTripInclude = {
   stops: { orderBy: { order: 'asc' }, include: { activities: true } },
   checklist: true,
   notes: { orderBy: { updatedAt: 'desc' } },
-  billExpenses: { orderBy: { createdAt: 'desc' }, include: { paidBy: true } }
+  ...tripBillInclude
 };
 
 export const getOwnedTrip = async (tripId, userId) => {
@@ -91,6 +92,14 @@ const normalizeMemberIds = (memberIds, ownerId) =>
     ? [...new Set(memberIds.map(Number).filter((id) => Number.isInteger(id) && id > 0 && id !== ownerId))]
     : [];
 
+const normalizeCurrency = (value = 'USD') => {
+  const currency = String(value ?? 'USD').trim().toUpperCase() || 'USD';
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw new HttpError(400, 'Currency must be a 3-letter ISO code');
+  }
+  return currency;
+};
+
 const buildBillParticipants = (owner, memberIds = [], group = null) => {
   const participants = new Map();
   participants.set(owner.id, { name: owner.name, userId: owner.id });
@@ -119,7 +128,7 @@ tripsRouter.get('/', asyncHandler(async (req, res) => {
     include: nestedTripInclude
   });
 
-  res.json(trips);
+  res.json(trips.map((trip) => serializeTripWithBills(trip)));
 }));
 
 tripsRouter.post('/', asyncHandler(async (req, res) => {
@@ -143,6 +152,7 @@ tripsRouter.post('/', asyncHandler(async (req, res) => {
       description: description?.trim() || null,
       coverImage: coverImage?.trim() || null,
       budget: parsedBudget,
+      currency: normalizeCurrency(req.body.currency),
       startDate: start,
       endDate: end,
       isPublic,
@@ -163,18 +173,20 @@ tripsRouter.post('/', asyncHandler(async (req, res) => {
       billParticipants: {
         create: buildBillParticipants(req.user, memberIds, group).map((participant) => ({
           name: participant.name ?? memberNameById.get(participant.userId) ?? 'Traveler',
-          userId: participant.userId
+          userId: participant.userId,
+          status: 'active'
         }))
       }
     },
     include: nestedTripInclude
   });
 
-  res.status(201).json(trip);
+  await syncTripBillParticipants(trip.id);
+  res.status(201).json(serializeTripWithBills(await getOwnedTrip(trip.id, req.user.id)));
 }));
 
 tripsRouter.get('/:id', asyncHandler(async (req, res) => {
-  res.json(await getAccessibleTrip(toInt(req.params.id), req.user.id));
+  res.json(serializeTripWithBills(await getAccessibleTrip(toInt(req.params.id), req.user.id)));
 }));
 
 tripsRouter.put('/:id', asyncHandler(async (req, res) => {
@@ -195,6 +207,7 @@ tripsRouter.put('/:id', asyncHandler(async (req, res) => {
       description: description?.trim() || null,
       coverImage: coverImage?.trim() || null,
       budget: parsedBudget,
+      ...(req.body.currency === undefined ? {} : { currency: normalizeCurrency(req.body.currency) }),
       startDate: start,
       endDate: end,
       ...(nextIsPublic === undefined
@@ -207,7 +220,7 @@ tripsRouter.put('/:id', asyncHandler(async (req, res) => {
     include: nestedTripInclude
   });
 
-  res.json(trip);
+  res.json(serializeTripWithBills(trip));
 }));
 
 tripsRouter.patch('/:id/cover', coverUpload.single('cover'), asyncHandler(async (req, res) => {
@@ -231,7 +244,7 @@ tripsRouter.patch('/:id/cover', coverUpload.single('cover'), asyncHandler(async 
     include: nestedTripInclude
   });
 
-  res.json(trip);
+  res.json(serializeTripWithBills(trip));
 }));
 
 tripsRouter.delete('/:id', asyncHandler(async (req, res) => {
@@ -271,19 +284,17 @@ tripsRouter.post('/:id/members', asyncHandler(async (req, res) => {
     throw new HttpError(404, 'User not found');
   }
 
-  await prisma.tripMember.upsert({
-    where: { tripId_userId: { tripId: trip.id, userId } },
-    create: { tripId: trip.id, userId },
-    update: {}
+  await prisma.$transaction(async (tx) => {
+    await tx.tripMember.upsert({
+      where: { tripId_userId: { tripId: trip.id, userId } },
+      create: { tripId: trip.id, userId },
+      update: {}
+    });
+    await syncTripBillParticipants(trip.id, tx);
+    await touchTrip(tx, trip.id);
   });
 
-  await prisma.billParticipant.upsert({
-    where: { tripId_userId: { tripId: trip.id, userId } },
-    create: { tripId: trip.id, userId, name: user.name },
-    update: { name: user.name }
-  });
-
-  res.status(201).json(await getOwnedTrip(trip.id, req.user.id));
+  res.status(201).json(serializeTripWithBills(await getOwnedTrip(trip.id, req.user.id)));
 }));
 
 tripsRouter.delete('/:id/members/:userId', asyncHandler(async (req, res) => {
@@ -291,6 +302,14 @@ tripsRouter.delete('/:id/members/:userId', asyncHandler(async (req, res) => {
   const userId = toInt(req.params.userId, 'userId');
   const trip = await getOwnedTrip(id, req.user.id);
 
-  await prisma.tripMember.deleteMany({ where: { tripId: trip.id, userId } });
-  res.json(await getOwnedTrip(trip.id, req.user.id));
+  if (userId === trip.userId) {
+    throw new HttpError(400, 'Owner cannot be removed from their own trip');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.tripMember.deleteMany({ where: { tripId: trip.id, userId } });
+    await syncTripBillParticipants(trip.id, tx);
+    await touchTrip(tx, trip.id);
+  });
+  res.json(serializeTripWithBills(await getOwnedTrip(trip.id, req.user.id)));
 }));

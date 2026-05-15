@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ReactNode } from 'react';
 import {
-  Pressable,
   StyleProp,
   StyleSheet,
   Text,
@@ -10,6 +9,7 @@ import {
 } from 'react-native';
 
 import { colors, radius, spacing, typography } from '../theme';
+import { HapticPressable as Pressable } from './HapticPressable';
 
 export type StatPillTone = 'primary' | 'neutral' | 'success' | 'warning' | 'danger';
 

@@ -62,7 +62,7 @@ server/prisma/           Database schema and migrations
 - Private/public trip controls.
 - Public itinerary sharing through generated share tokens.
 - Trip stops, activities, itinerary timeline, budget, checklist, and notes.
-- Simple bill splitting with travelers, shared expenses, and settle-up suggestions.
+- Splitwise-style shared bills with travelers, custom splits, balances, and recorded settle-up payments.
 - Usernames, friend requests, friends, and private friend groups.
 - Shared trips with direct friend collaborators or group-based access.
 - Crew management on Trip Detail, with owners controlling membership and sharing.
@@ -197,10 +197,30 @@ Run mobile:
 npm --prefix mobile run start
 ```
 
+Run on a physical iPhone with Expo Go:
+
+```bash
+npm --prefix mobile run start:device
+```
+
+If your terminal is already inside `mobile/`, run:
+
+```bash
+npm run start:device
+```
+
+Then scan the QR code from the Expo Go app. Do not use `npm --prefix mobile run start:ios` for a physical phone; that script is simulator-only and intentionally publishes `exp://127.0.0.1:8081`, which an iPhone cannot reach.
+
 Run mobile with tunnel mode:
 
 ```bash
 npm --prefix mobile run start:tunnel
+```
+
+If your terminal is already inside `mobile/`, run:
+
+```bash
+npm run start:tunnel
 ```
 
 Or from inside `mobile/`:

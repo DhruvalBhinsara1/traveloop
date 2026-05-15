@@ -6,6 +6,9 @@
   "scripts": {
     "start": "expo start",
     "start:ios": "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer expo start --ios --localhost --clear",
+    "start:ios:simulator": "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer expo start --ios --localhost --clear",
+    "start:ios:device": "expo start --lan --clear",
+    "start:device": "expo start --lan --clear",
     "start:lan": "expo start --lan --clear",
     "start:localhost": "expo start --localhost --clear",
     "start:tunnel": "expo start --tunnel --clear",

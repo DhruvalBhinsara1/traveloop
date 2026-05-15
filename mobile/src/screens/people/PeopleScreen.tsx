@@ -6,7 +6,6 @@ import { ReactNode, useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,6 +18,7 @@ import { socialApi } from '../../api/social';
 import { FriendGroup, FriendRequest, PublicUser, UserSearchResult } from '../../api/types';
 import { BottomSheet } from '../../components/BottomSheet';
 import { Button } from '../../components/Button';
+import { HapticPressable as Pressable } from '../../components/HapticPressable';
 import { InputField } from '../../components/InputField';
 import { Screen } from '../../components/Screen';
 import { useAuth } from '../../context/AuthContext';

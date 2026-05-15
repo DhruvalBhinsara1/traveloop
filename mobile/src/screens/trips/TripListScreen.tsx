@@ -1,8 +1,9 @@
 import * as Haptics from 'expo-haptics';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { TripCard } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
+import { HapticPressable as Pressable } from '../../components/HapticPressable';
 import { Screen } from '../../components/Screen';
 import { Button } from '../../components/Button';
 import { colors, typography } from '../../theme';

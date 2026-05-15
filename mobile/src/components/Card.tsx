@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ImageBackground, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ImageBackground, StyleSheet, Text, View } from 'react-native';
 
 import { colors, radius, shadows, typography } from '../theme';
 import { formatDateRange } from '../utils/dateHelpers';
 import { Trip } from '../api/types';
 import { IconButton } from './Button';
+import { HapticPressable as Pressable } from './HapticPressable';
 import { getDestinationImage } from './photoUtils';
 
 type DestinationCardProps = {

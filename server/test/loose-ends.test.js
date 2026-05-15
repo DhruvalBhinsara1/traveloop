@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { after, describe, test } from 'node:test';
 
-import { serializeSplit } from '../src/routes/bills.js';
 import { serializePublicTrip } from '../src/routes/public.js';
 import { prisma } from '../src/prisma.js';
+import { serializeSplit, serializeTripWithBills, syncTripBillParticipants } from '../src/utils/billLedger.js';
 import { assertValidImageUpload, detectImageMimeType } from '../src/utils/cloudStorage.js';
+import { allocateByWeight, buildSplitSummary, resolveExpenseShares } from '../src/utils/splitMath.js';
 import { validateActivity, validateActivityDuration, validateStop, validateTrip } from '../src/utils/validators.js';
 
 after(async () => {
@@ -125,10 +126,222 @@ describe('split serialization', () => {
     const split = serializeSplit(trip);
 
     assert.equal(split.participants[0].canRemove, false);
+    assert.equal(split.participants[0].canUseInNewExpense, true);
     assert.equal(split.participants[1].canRemove, false);
     assert.equal(split.participants[2].canRemove, true);
+    assert.equal(split.participants[2].status, 'former');
+    assert.equal(split.participants[2].canUseInNewExpense, false);
     assert.equal(split.participants[3].canRemove, true);
+    assert.equal(split.participants[3].status, 'guest');
+    assert.equal(split.participants[3].canUseInNewExpense, true);
     assert.equal(split.expenses[0].paidBy.canRemove, true);
+  });
+
+  test('excludes deleted expenses and settlements from split and trip bill serializers', () => {
+    const owner = { id: 1, name: 'Owner', tripId: 20, userId: 100, createdAt: 'now' };
+    const member = { id: 2, name: 'Member', tripId: 20, userId: 200, createdAt: 'now' };
+    const activeExpense = {
+      id: 11,
+      title: 'Hotel',
+      amount: 90,
+      amountCents: 9000,
+      tripId: 20,
+      paidById: 1,
+      paidBy: owner,
+      payments: [{ participantId: 1, amountCents: 9000 }],
+      shares: [
+        { participantId: 1, amountCents: 4500 },
+        { participantId: 2, amountCents: 4500 }
+      ],
+      createdAt: 'now'
+    };
+    const deletedExpense = { ...activeExpense, id: 12, title: 'Deleted', deletedAt: 'then' };
+    const activeSettlement = {
+      id: 3,
+      tripId: 20,
+      fromParticipantId: 2,
+      toParticipantId: 1,
+      amountCents: 1000,
+      fromParticipant: member,
+      toParticipant: owner
+    };
+    const deletedSettlement = { ...activeSettlement, id: 4, deletedAt: 'then' };
+    const trip = {
+      id: 20,
+      userId: 100,
+      user: { id: 100 },
+      members: [{ userId: 200 }],
+      billParticipants: [owner, member],
+      billExpenses: [activeExpense, deletedExpense],
+      billSettlements: [activeSettlement, deletedSettlement]
+    };
+
+    const split = serializeSplit(trip);
+    const serializedTrip = serializeTripWithBills(trip);
+
+    assert.deepEqual(split.expenses.map((expense) => expense.id), [11]);
+    assert.deepEqual(serializedTrip.billExpenses.map((expense) => expense.id), [11]);
+    assert.equal(split.summary.totalCents, 9000);
+    assert.equal(serializedTrip.billExpenses[0].amount, 90);
+    assert.equal(serializedTrip.billExpenses[0].amountCents, 9000);
+    assert.deepEqual(split.settlements.map((settlement) => settlement.id), [3]);
+    assert.deepEqual(serializedTrip.billSettlements.map((settlement) => settlement.id), [3]);
+  });
+
+  test('syncs active trip and group users without marking overlapping access former', async () => {
+    const calls = [];
+    const tx = {
+      billParticipant: {
+        upsert: async (args) => calls.push(['upsert', args]),
+        updateMany: async (args) => calls.push(['updateMany', args])
+      }
+    };
+    const trip = {
+      id: 30,
+      userId: 100,
+      user: { id: 100, name: 'Owner' },
+      members: [{ userId: 200, user: { id: 200, name: 'Direct' } }],
+      group: { members: [{ userId: 200, user: { id: 200, name: 'Direct' } }, { userId: 300, user: { id: 300, name: 'Group' } }] }
+    };
+
+    const activeIds = await syncTripBillParticipants(trip, tx);
+    const upserts = calls.filter(([kind]) => kind === 'upsert');
+    const updateMany = calls.find(([kind]) => kind === 'updateMany')[1];
+
+    assert.deepEqual([...activeIds].sort((a, b) => a - b), [100, 200, 300]);
+    assert.equal(upserts.length, 3);
+    assert.deepEqual(updateMany.where.NOT.userId.in.sort((a, b) => a - b), [100, 200, 300]);
+    assert.deepEqual(updateMany.data, { status: 'former', archivedAt: null });
+    assert.equal(upserts[0][1].update.archivedAt, null);
+  });
+});
+
+describe('split math', () => {
+  test('equal split distributes cents deterministically', () => {
+    assert.deepEqual(allocateByWeight(100, [
+      { participantId: 2, weight: 1 },
+      { participantId: 1, weight: 1 },
+      { participantId: 3, weight: 1 }
+    ]), [
+      { participantId: 1, amountCents: 34 },
+      { participantId: 2, amountCents: 33 },
+      { participantId: 3, amountCents: 33 }
+    ]);
+  });
+
+  test('exact split must match the expense total', () => {
+    assert.throws(() => resolveExpenseShares({
+      amountCents: 1000,
+      defaultParticipantIds: [1, 2],
+      split: {
+        mode: 'exact',
+        shares: [
+          { participantId: 1, amountCents: 400 },
+          { participantId: 2, amountCents: 500 }
+        ]
+      }
+    }), /equal the expense amount/);
+  });
+
+  test('percent and share splits round to the exact amount', () => {
+    assert.deepEqual(resolveExpenseShares({
+      amountCents: 100,
+      defaultParticipantIds: [1, 2, 3],
+      split: {
+        mode: 'percent',
+        shares: [
+          { participantId: 1, percentBps: 3333 },
+          { participantId: 2, percentBps: 3333 },
+          { participantId: 3, percentBps: 3334 }
+        ]
+      }
+    }).shares, [
+      { participantId: 1, amountCents: 33, percentBps: 3333 },
+      { participantId: 2, amountCents: 33, percentBps: 3333 },
+      { participantId: 3, amountCents: 34, percentBps: 3334 }
+    ]);
+
+    assert.deepEqual(resolveExpenseShares({
+      amountCents: 100,
+      defaultParticipantIds: [1, 2],
+      split: {
+        mode: 'shares',
+        shares: [
+          { participantId: 1, shares: 2 },
+          { participantId: 2, shares: 1 }
+        ]
+      }
+    }).shares, [
+      { participantId: 1, amountCents: 67, shares: 2 },
+      { participantId: 2, amountCents: 33, shares: 1 }
+    ]);
+  });
+
+  test('recorded settlements adjust balances but not spend', () => {
+    const summary = buildSplitSummary({
+      participants: [
+        { id: 1, name: 'A' },
+        { id: 2, name: 'B' }
+      ],
+      expenses: [
+        {
+          id: 1,
+          title: 'Hotel',
+          amountCents: 1000,
+          paidById: 1,
+          payments: [{ participantId: 1, amountCents: 1000 }],
+          shares: [
+            { participantId: 1, amountCents: 500 },
+            { participantId: 2, amountCents: 500 }
+          ]
+        }
+      ],
+      settlements: [{ fromParticipantId: 2, toParticipantId: 1, amountCents: 200 }]
+    });
+
+    assert.equal(summary.totalCents, 1000);
+    assert.equal(summary.balances.find((balance) => balance.participantId === 1).netCents, 300);
+    assert.equal(summary.balances.find((balance) => balance.participantId === 2).netCents, -300);
+  });
+
+  test('deleted expenses and settlements are ignored in totals and balances', () => {
+    const summary = buildSplitSummary({
+      participants: [
+        { id: 1, name: 'A' },
+        { id: 2, name: 'B' }
+      ],
+      expenses: [
+        {
+          id: 1,
+          title: 'Active',
+          amountCents: 1000,
+          paidById: 1,
+          payments: [{ participantId: 1, amountCents: 1000 }],
+          shares: [
+            { participantId: 1, amountCents: 500 },
+            { participantId: 2, amountCents: 500 }
+          ]
+        },
+        {
+          id: 2,
+          title: 'Deleted',
+          amountCents: 10000,
+          paidById: 2,
+          deletedAt: 'then',
+          payments: [{ participantId: 2, amountCents: 10000 }],
+          shares: [{ participantId: 1, amountCents: 10000 }]
+        }
+      ],
+      settlements: [
+        { fromParticipantId: 2, toParticipantId: 1, amountCents: 500 },
+        { fromParticipantId: 1, toParticipantId: 2, amountCents: 10000, deletedAt: 'then' }
+      ]
+    });
+
+    assert.equal(summary.totalCents, 1000);
+    assert.equal(summary.balances.find((balance) => balance.participantId === 1).netCents, 0);
+    assert.equal(summary.balances.find((balance) => balance.participantId === 2).netCents, 0);
+    assert.equal(summary.settlements.length, 0);
   });
 });
 

@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, ViewStyle } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, ViewStyle } from 'react-native';
 
 import { colors, shadows, typography } from '../theme';
+import { HapticPressable as Pressable } from './HapticPressable';
 
 type Props = {
   label: string;

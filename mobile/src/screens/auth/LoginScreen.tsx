@@ -1,10 +1,11 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useState } from 'react';
-import { ImageBackground, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ImageBackground, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { getErrorMessage } from '../../api/client';
 import { Button } from '../../components/Button';
+import { HapticPressable as Pressable } from '../../components/HapticPressable';
 import { InputField } from '../../components/InputField';
 import { colors, typography } from '../../theme';
 import { useAuth } from '../../context/AuthContext';

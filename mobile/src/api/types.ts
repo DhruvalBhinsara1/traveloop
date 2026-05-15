@@ -107,7 +107,34 @@ export type BillParticipant = {
   tripId: number;
   userId?: number | null;
   user?: PublicUser | null;
+  status?: 'active' | 'guest' | 'former' | 'archived' | string;
+  archivedAt?: string | null;
   canRemove: boolean;
+  isActiveTripUser?: boolean;
+  canUseInNewExpense?: boolean;
+  canArchive?: boolean;
+  createdAt: string;
+};
+
+export type BillSplitMode = 'equal' | 'exact' | 'percent' | 'shares';
+
+export type BillExpensePayment = {
+  id: number;
+  expenseId: number;
+  participantId: number;
+  amountCents: number;
+  amount: number;
+  createdAt: string;
+};
+
+export type BillExpenseShare = {
+  id: number;
+  expenseId: number;
+  participantId: number;
+  amountCents: number;
+  amount: number;
+  percentBps?: number | null;
+  shares?: number | null;
   createdAt: string;
 };
 
@@ -115,33 +142,61 @@ export type BillExpense = {
   id: number;
   title: string;
   amount: number;
+  amountCents?: number;
+  currency?: string;
+  splitMode?: BillSplitMode;
+  category?: string | null;
+  note?: string | null;
+  paidAt?: string;
   tripId: number;
   paidById: number;
   paidBy?: BillParticipant;
+  payments?: BillExpensePayment[];
+  shares?: BillExpenseShare[];
   createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+  createdByUserId?: number | null;
+  updatedByUserId?: number | null;
+  deletedByUserId?: number | null;
 };
 
 export type BillBalance = {
   participantId: number;
   name: string;
   amount: number;
+  paidCents?: number;
+  owedCents?: number;
+  settlementPaidCents?: number;
+  settlementReceivedCents?: number;
+  netCents?: number;
 };
 
 export type BillSettlement = {
+  id?: number;
   fromParticipantId: number;
   from: string;
   toParticipantId: number;
   to: string;
   amount: number;
+  amountCents?: number;
+  currency?: string;
+  note?: string | null;
+  settledAt?: string;
+  createdAt?: string;
 };
 
 export type BillSplit = {
   participants: BillParticipant[];
   expenses: BillExpense[];
+  settlements?: BillSettlement[];
   summary: {
     total: number;
+    totalCents?: number;
+    currency?: string;
     perPerson: number;
     balances: BillBalance[];
+    suggestedSettlements?: BillSettlement[];
     settlements: BillSettlement[];
   };
 };
@@ -152,6 +207,7 @@ export type Trip = {
   description?: string | null;
   coverImage?: string | null;
   budget?: number | null;
+  currency?: string;
   startDate: string;
   endDate: string;
   isPublic: boolean;
@@ -165,6 +221,7 @@ export type Trip = {
   checklist: ChecklistItem[];
   notes: Note[];
   billExpenses?: BillExpense[];
+  billSettlements?: BillSettlement[];
   createdAt?: string;
   updatedAt?: string;
 };
@@ -294,6 +351,30 @@ export type CreateBillParticipantPayload = {
 
 export type CreateBillExpensePayload = {
   title: string;
-  amount: number;
+  amount?: number;
+  amountCents?: number;
   paidById: number;
+  paidAt?: string;
+  category?: string | null;
+  note?: string | null;
+  split?: {
+    mode: BillSplitMode;
+    participantIds?: number[];
+    shares?: Array<{
+      participantId: number;
+      amount?: number;
+      amountCents?: number;
+      percentBps?: number;
+      shares?: number;
+    }>;
+  };
+};
+
+export type CreateBillSettlementPayload = {
+  fromParticipantId: number;
+  toParticipantId: number;
+  amount?: number;
+  amountCents?: number;
+  settledAt?: string;
+  note?: string | null;
 };

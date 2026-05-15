@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
 import Toast from 'react-native-toast-message';
 
 import { getErrorMessage } from '../../api/client';
 import { Button } from '../../components/Button';
+import { HapticPressable as Pressable } from '../../components/HapticPressable';
 import { InputField } from '../../components/InputField';
 import { Screen } from '../../components/Screen';
 import { colors, typography } from '../../theme';
